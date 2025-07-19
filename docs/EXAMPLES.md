@@ -2,7 +2,128 @@
 
 Complete examples demonstrating how AI agents can use the Graph Memory MCP Server.
 
-## Example 1: Building a Project Knowledge Base
+## Example 1: Proper Memory Bank Organization
+
+This example demonstrates the **CRITICAL** practice of using separate memory banks for different topics/projects.
+
+### Scenario: AI Agent Managing Multiple Clients
+
+**❌ WRONG APPROACH - Single Bank (Causes Topic Contamination):**
+```json
+// DON'T DO THIS - Everything mixed in "default" bank
+{
+  "tool": "create_entities",
+  "arguments": {
+    "entities": [
+      {"name": "acme-login-system", "entityType": "feature"},
+      {"name": "techco-payment-api", "entityType": "api"},
+      {"name": "personal-recipe-app", "entityType": "project"}
+    ]
+  }
+}
+```
+
+**✅ CORRECT APPROACH - Separate Banks for Topic Isolation:**
+
+#### Step 1: Create Dedicated Banks
+
+```json
+// Bank for ACME Corp project
+POST /banks/create
+{
+  "name": "client-acme-ecommerce"
+}
+
+// Bank for TechCo project  
+POST /banks/create
+{
+  "name": "client-techco-fintech"
+}
+
+// Bank for personal projects
+POST /banks/create
+{
+  "name": "personal-projects"
+}
+```
+
+#### Step 2: Work in ACME Bank
+```json
+// Switch to ACME bank
+POST /banks/select
+{
+  "name": "client-acme-ecommerce"
+}
+
+// Create ACME-specific entities
+{
+  "tool": "create_entities",
+  "arguments": {
+    "entities": [
+      {
+        "name": "user-authentication", 
+        "entityType": "feature",
+        "observations": ["OAuth2 integration required", "Must support social login"]
+      },
+      {
+        "name": "product-catalog",
+        "entityType": "component", 
+        "observations": ["Display products with filtering", "Support categories"]
+      }
+    ]
+  }
+}
+```
+
+#### Step 3: Work in TechCo Bank
+```json
+// Switch to TechCo bank
+POST /banks/select
+{
+  "name": "client-techco-fintech"
+}
+
+// Create TechCo-specific entities (completely separate)
+{
+  "tool": "create_entities", 
+  "arguments": {
+    "entities": [
+      {
+        "name": "payment-processing",
+        "entityType": "api",
+        "observations": ["Stripe integration", "PCI compliance required"]
+      },
+      {
+        "name": "fraud-detection",
+        "entityType": "service",
+        "observations": ["ML-based risk scoring", "Real-time analysis"]
+      }
+    ]
+  }
+}
+```
+
+#### Step 4: Search Within Specific Context
+```json
+// Search only ACME knowledge (no TechCo contamination)
+{
+  "tool": "search_nodes",
+  "arguments": {
+    "query": "authentication",
+    "bank": "client-acme-ecommerce"  // ← Targeted search
+  }
+}
+```
+
+### Benefits of Proper Bank Organization:
+
+1. **🎯 Clean Search Results**: No irrelevant cross-project contamination
+2. **🛡️ Context Isolation**: Each client's knowledge stays separate  
+3. **📊 Clear Visualization**: Each bank shows only relevant relationships
+4. **🔒 Data Security**: Client data naturally segregated
+5. **🧹 Easy Cleanup**: Delete entire bank when project ends
+
+## Example 2: Building a Project Knowledge Base
 
 This example shows how an AI agent can build and maintain a comprehensive knowledge base for a software project.
 

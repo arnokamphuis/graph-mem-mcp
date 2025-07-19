@@ -17,6 +17,26 @@ A Model Context Protocol (MCP) compliant server that provides persistent graph-b
 - **Container Deployment**: Docker/Podman containerization with volume mounting
 - **RESTful API**: Full REST endpoints alongside MCP protocol
 
+## 🏦 **CRITICAL: Memory Bank Organization for AI Agents**
+
+**⚠️ AI agents MUST use separate memory banks to organize different topics, projects, or contexts.**
+
+This server supports **multi-bank architecture** - think of banks as separate databases for different purposes:
+
+- **✅ Use separate banks for**: Different projects, users, topics, or domains
+- **❌ Never mix**: Unrelated topics in the same bank
+- **📝 Naming**: Use descriptive names like `"client-acme-ecommerce"` or `"python-ml-research"`
+
+**Example Organization:**
+```
+📁 client-acme-ecommerce    ← E-commerce project knowledge
+📁 client-techco-api        ← API development project  
+📁 research-ai-trends       ← AI research knowledge
+📁 user-alice-personal      ← Alice's personal projects
+```
+
+**See [MCP Integration Guide](docs/MCP_INTEGRATION.md#-important-memory-bank-organization-for-ai-agents) for complete bank organization guidelines.**
+
 ## 🚀 Quick Start
 
 ### 1. Build and Run with Podman

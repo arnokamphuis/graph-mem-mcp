@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
@@ -141,10 +141,10 @@ def load_memory_banks():
             with open(MEMORY_FILE, 'r') as f:
                 data = json.load(f)
             deserialize_memory_banks(data)
-            logger.info(f"Memory banks loaded from {MEMORY_FILE}")
-            logger.info(f"Loaded banks: {list(memory_banks.keys())}")
+            logger.debug(f"Memory banks loaded from {MEMORY_FILE}")
+            logger.debug(f"Loaded banks: {list(memory_banks.keys())}")
         else:
-            logger.info("No existing memory file found, starting with default banks")
+            logger.debug("No existing memory file found, starting with default banks")
             memory_banks = {"default": {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}}
         
         # Ensure current_bank exists
@@ -1894,7 +1894,7 @@ def initialize():
 # MCP stdio mode - for proper MCP protocol compliance
 async def handle_mcp_stdio():
     """Handle MCP communication over stdio"""
-    logger.info("Starting MCP stdio mode")
+    logger.debug("Starting MCP stdio mode")
     
     while True:
         try:
@@ -1904,7 +1904,6 @@ async def handle_mcp_stdio():
                 break
                 
             request = json.loads(line.strip())
-            logger.info(f"MCP stdio request: {request}")
             
             # Handle the request
             if request.get("method") == "initialize":
@@ -1934,7 +1933,7 @@ async def handle_mcp_stdio():
                         "tools": [
                             {
                                 "name": "create_entities",
-                                "description": "Create multiple new entities in the knowledge graph",
+                                "description": "Create multiple new entities in the knowledge graph. IMPORTANT: Use separate memory banks for different topics/projects (e.g., 'client-acme-project', 'personal-research'). Create banks using POST /banks/create and switch using POST /banks/select before creating entities. Never mix unrelated topics in the same bank.",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {
@@ -2023,8 +2022,108 @@ async def handle_mcp_stdio():
                                     },
                                     "required": ["text"]
                                 }
+                            },
+                            {
+                                "name": "search_nodes",
+                                "description": "Search for nodes in the knowledge graph based on a query. IMPORTANT: Search within specific banks using bank parameter to avoid cross-topic contamination. Use GET /banks/list to see available banks first.",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "query": {"type": "string", "description": "The search query to match against entity names, types, and observation content"},
+                                        "bank": {"type": "string", "description": "Optional: Memory bank to search in (e.g., 'client-acme-project'). If not specified, searches current bank."}
+                                    },
+                                    "required": ["query"]
+                                }
+                            },
+                            {
+                                "name": "delete_entities",
+                                "description": "Delete multiple entities and their associated relations from the knowledge graph",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "entityNames": {"type": "array", "items": {"type": "string"}, "description": "An array of entity names to delete"}
+                                    },
+                                    "required": ["entityNames"]
+                                }
+                            },
+                            {
+                                "name": "delete_relations",
+                                "description": "Delete multiple relations from the knowledge graph",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "relations": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "from": {"type": "string", "description": "The name of the entity where the relation starts"},
+                                                    "to": {"type": "string", "description": "The name of the entity where the relation ends"},
+                                                    "relationType": {"type": "string", "description": "The type of the relation"}
+                                                },
+                                                "required": ["from", "to", "relationType"]
+                                            },
+                                            "description": "An array of relations to delete"
+                                        }
+                                    },
+                                    "required": ["relations"]
+                                }
+                            },
+                            {
+                                "name": "delete_observations",
+                                "description": "Delete specific observations from entities in the knowledge graph",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "deletions": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "entityName": {"type": "string", "description": "The name of the entity containing the observations"},
+                                                    "observations": {"type": "array", "items": {"type": "string"}, "description": "An array of observations to delete"}
+                                                },
+                                                "required": ["entityName", "observations"]
+                                            },
+                                            "description": "An array of deletion specifications"
+                                        }
+                                    },
+                                    "required": ["deletions"]
+                                }
+                            },
+                            {
+                                "name": "read_graph",
+                                "description": "Read the entire knowledge graph summary for the current memory bank. Shows entity/relationship counts and types. Use this to understand bank contents before adding new knowledge.",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "bank": {"type": "string", "description": "Optional: Memory bank to read (e.g., 'client-acme-project'). If not specified, reads current bank."}
+                                    }
+                                }
+                            },
+                            {
+                                "name": "open_nodes",
+                                "description": "Open specific nodes in the knowledge graph by their names",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "names": {"type": "array", "items": {"type": "string"}, "description": "An array of entity names to retrieve"}
+                                    },
+                                    "required": ["names"]
+                                }
                             }
                         ]
+                    }
+                }
+            elif request.get("method") == "notifications/initialized":
+                # Handle initialized notification - no response needed
+                continue  # Skip sending response for notifications
+            elif request.get("method") == "prompts/list":
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": request.get("id"),
+                    "result": {
+                        "prompts": []
                     }
                 }
             elif request.get("method") == "tools/call":
@@ -2338,6 +2437,187 @@ async def handle_mcp_stdio():
                                            f"- {len(observations)} observations\n\n" +
                                            f"Top entities: {', '.join([e['entity_id'] for e in entities[:5]])}\n" +
                                            "Top relationships: " + ', '.join([f"{r['from_entity']}->{r['to_entity']}" for r in relationships[:3]])
+                                }
+                            ]
+                        }
+                    }
+                
+                elif tool_name == "delete_entities":
+                    entity_names = arguments.get("entityNames", [])
+                    deleted_count = 0
+                    
+                    for entity_name in entity_names:
+                        if entity_name in memory_banks[current_bank]["nodes"]:
+                            # Remove the entity
+                            del memory_banks[current_bank]["nodes"][entity_name]
+                            deleted_count += 1
+                            
+                            # Remove related edges
+                            memory_banks[current_bank]["edges"] = [
+                                edge for edge in memory_banks[current_bank]["edges"]
+                                if edge.source != entity_name and edge.target != entity_name
+                            ]
+                            
+                            # Remove related observations
+                            memory_banks[current_bank]["observations"] = [
+                                obs for obs in memory_banks[current_bank]["observations"]
+                                if obs.entity_id != entity_name
+                            ]
+                    
+                    save_memory_banks()
+                    
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Deleted {deleted_count} entities and their associated relations and observations"
+                                }
+                            ]
+                        }
+                    }
+                
+                elif tool_name == "delete_relations":
+                    relations = arguments.get("relations", [])
+                    deleted_count = 0
+                    
+                    for rel_data in relations:
+                        from_entity = rel_data["from"]
+                        to_entity = rel_data["to"]
+                        relation_type = rel_data["relationType"]
+                        
+                        # Find and remove matching edges
+                        original_count = len(memory_banks[current_bank]["edges"])
+                        memory_banks[current_bank]["edges"] = [
+                            edge for edge in memory_banks[current_bank]["edges"]
+                            if not (edge.source == from_entity and 
+                                   edge.target == to_entity and 
+                                   edge.data.get("type") == relation_type)
+                        ]
+                        deleted_count += original_count - len(memory_banks[current_bank]["edges"])
+                    
+                    save_memory_banks()
+                    
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Deleted {deleted_count} relations"
+                                }
+                            ]
+                        }
+                    }
+                
+                elif tool_name == "delete_observations":
+                    deletions = arguments.get("deletions", [])
+                    total_deleted = 0
+                    
+                    for deletion in deletions:
+                        entity_name = deletion["entityName"]
+                        observations_to_delete = deletion["observations"]
+                        
+                        # Remove specified observations
+                        original_count = len(memory_banks[current_bank]["observations"])
+                        memory_banks[current_bank]["observations"] = [
+                            obs for obs in memory_banks[current_bank]["observations"]
+                            if not (obs.entity_id == entity_name and obs.content in observations_to_delete)
+                        ]
+                        total_deleted += original_count - len(memory_banks[current_bank]["observations"])
+                    
+                    save_memory_banks()
+                    
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Deleted {total_deleted} observations"
+                                }
+                            ]
+                        }
+                    }
+                
+                elif tool_name == "read_graph":
+                    bank = arguments.get("bank", current_bank)
+                    if bank not in memory_banks:
+                        bank = current_bank
+                    
+                    nodes = memory_banks[bank]["nodes"]
+                    edges = memory_banks[bank]["edges"]
+                    observations = memory_banks[bank]["observations"]
+                    
+                    graph_summary = {
+                        "bank": bank,
+                        "entities": len(nodes),
+                        "relationships": len(edges),
+                        "observations": len(observations),
+                        "entity_types": list(set(node.data.get("type", "unknown") for node in nodes.values())),
+                        "relation_types": list(set(edge.data.get("type", "unknown") for edge in edges))
+                    }
+                    
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Knowledge Graph Summary for bank '{bank}':\n" +
+                                           f"- {graph_summary['entities']} entities\n" +
+                                           f"- {graph_summary['relationships']} relationships\n" +
+                                           f"- {graph_summary['observations']} observations\n" +
+                                           f"- Entity types: {', '.join(graph_summary['entity_types'])}\n" +
+                                           f"- Relation types: {', '.join(graph_summary['relation_types'])}"
+                                }
+                            ]
+                        }
+                    }
+                
+                elif tool_name == "open_nodes":
+                    names = arguments.get("names", [])
+                    found_nodes = []
+                    
+                    for name in names:
+                        if name in memory_banks[current_bank]["nodes"]:
+                            node = memory_banks[current_bank]["nodes"][name]
+                            # Get related observations
+                            node_observations = [
+                                obs.content for obs in memory_banks[current_bank]["observations"]
+                                if obs.entity_id == name
+                            ]
+                            # Get related relationships
+                            node_relations = [
+                                {"from": edge.source, "to": edge.target, "type": edge.data.get("type", "unknown")}
+                                for edge in memory_banks[current_bank]["edges"]
+                                if edge.source == name or edge.target == name
+                            ]
+                            
+                            found_nodes.append({
+                                "name": name,
+                                "type": node.data.get("type", "unknown"),
+                                "observations": node_observations,
+                                "relationships": node_relations
+                            })
+                    
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Retrieved {len(found_nodes)} nodes:\n" +
+                                           "\n".join([
+                                               f"- {node['name']} ({node['type']}): {len(node['observations'])} observations, {len(node['relationships'])} relationships"
+                                               for node in found_nodes
+                                           ])
                                 }
                             ]
                         }

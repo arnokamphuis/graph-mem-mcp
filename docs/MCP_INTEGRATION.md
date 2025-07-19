@@ -6,6 +6,139 @@ This guide explains how AI agents can integrate with the Graph Memory MCP Server
 
 The Graph Memory MCP Server provides AI agents with persistent, graph-based memory capabilities through the Model Context Protocol (MCP). Agents can store entities, relationships, observations, and reasoning steps that persist across conversations and sessions.
 
+## 🏦 **IMPORTANT: Memory Bank Organization for AI Agents**
+
+**AI agents MUST use separate memory banks to keep different topics, projects, or contexts isolated.** This is crucial for maintaining clean, organized knowledge graphs and preventing topic contamination.
+
+### When to Create New Banks
+
+**Create a new bank for each:**
+
+1. **Different Projects/Topics**
+   - Each software project should have its own bank
+   - Different research topics should be separate
+   - Unrelated conversations or contexts should be isolated
+
+2. **Different Users/Sessions** 
+   - Each user should have their own bank
+   - Different conversation threads should be separate
+
+3. **Different Domains**
+   - Technical vs. business knowledge
+   - Different subject areas (e.g., "python-development", "marketing-strategy")
+
+### Bank Naming Conventions
+
+Use descriptive, kebab-case names:
+
+```
+✅ GOOD EXAMPLES:
+- "user-auth-system"
+- "python-ml-project" 
+- "customer-support-kb"
+- "aws-infrastructure"
+- "user-john-doe-session"
+
+❌ BAD EXAMPLES:
+- "stuff"
+- "temp"
+- "data"
+- "test123"
+```
+
+### Bank Organization Examples
+
+#### Example 1: Software Development Agency
+```
+Banks:
+├── client-acme-ecommerce     # ACME Corp e-commerce project
+├── client-techco-api         # TechCo API development
+├── internal-hr-system        # Internal HR management system
+└── research-ai-trends        # AI technology research
+```
+
+#### Example 2: Personal Assistant
+```
+Banks:
+├── user-alice-work          # Alice's work-related knowledge
+├── user-alice-personal      # Alice's personal projects
+├── user-bob-consulting      # Bob's consulting work
+└── shared-company-policies  # Shared organizational knowledge
+```
+
+#### Example 3: Research Assistant
+```
+Banks:
+├── climate-research         # Climate science research
+├── renewable-energy        # Renewable energy technologies
+├── policy-analysis         # Policy and regulation analysis
+└── literature-reviews      # Academic literature reviews
+```
+
+### How to Use Banks in Your Agent Code
+
+**Always specify the bank parameter when creating knowledge:**
+
+```json
+{
+  "tool": "ingest_knowledge", 
+  "arguments": {
+    "text": "Project requirements document...",
+    "bank": "client-acme-ecommerce",  // ← ALWAYS specify bank
+    "source": "requirements-doc",
+    "extract_entities": true,
+    "extract_relationships": true
+  }
+}
+```
+
+**Search within specific banks:**
+
+```json
+{
+  "tool": "search_nodes",
+  "arguments": {
+    "query": "authentication requirements",
+    "bank": "client-acme-ecommerce"  // ← Search only in relevant bank
+  }
+}
+```
+
+### Best Practices for AI Agents
+
+1. **🎯 Topic Isolation**: Never mix unrelated topics in the same bank
+2. **📝 Descriptive Naming**: Use clear, descriptive bank names
+3. **🔍 Targeted Searches**: Always search within the relevant bank
+4. **🗂️ Consistent Organization**: Maintain consistent naming patterns
+5. **🧹 Regular Cleanup**: Archive or delete obsolete banks when projects end
+
+### Bank Management Tools
+
+```json
+// Create a new bank
+POST /banks/create
+{
+  "name": "new-project-bank"
+}
+
+// Switch to a bank  
+POST /banks/select
+{
+  "name": "target-bank"
+}
+
+// List all banks
+GET /banks/list
+
+// Delete a bank (when project is complete)
+POST /banks/delete
+{
+  "name": "obsolete-bank"
+}
+```
+
+**⚠️ Remember: Using banks properly is essential for maintaining organized, scalable knowledge graphs that don't become polluted with cross-topic contamination.**
+
 ## MCP Protocol Support
 
 ### Supported Methods
