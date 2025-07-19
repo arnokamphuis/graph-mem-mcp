@@ -399,6 +399,326 @@ def get_reasoning_steps(bank: str = Query(None)):
     b = bank or current_bank
     return [s.dict() for s in memory_banks[b]["reasoning_steps"]]
 
+
+# Search Helper Functions
+import re
+from typing import List, Dict, Any, Optional, Union
+
+def search_text(query: str, text: str, case_sensitive: bool = False, use_regex: bool = False) -> bool:
+    """Helper function to search text with various matching options."""
+    if not query or not text:
+        return False
+    
+    if use_regex:
+        try:
+            flags = 0 if case_sensitive else re.IGNORECASE
+            return bool(re.search(query, text, flags))
+        except re.error:
+            # If regex is invalid, fall back to simple search
+            pass
+    
+    if case_sensitive:
+        return query in text
+    else:
+        return query.lower() in text.lower()
+
+def calculate_relevance_score(query: str, text: str, exact_match_bonus: float = 0.5) -> float:
+    """Calculate relevance score for search results."""
+    if not query or not text:
+        return 0.0
+    
+    query_lower = query.lower()
+    text_lower = text.lower()
+    
+    # Exact match gets highest score
+    if query_lower == text_lower:
+        return 1.0
+    
+    # Check if query appears as whole word
+    if f" {query_lower} " in f" {text_lower} ":
+        return 0.8 + exact_match_bonus
+    
+    # Partial match score based on coverage
+    if query_lower in text_lower:
+        coverage = len(query_lower) / len(text_lower)
+        return min(0.7, 0.3 + coverage)
+    
+    return 0.0
+
+def search_entities(query: str, bank: str = None, entity_type: str = None, 
+                   case_sensitive: bool = False, use_regex: bool = False) -> List[Dict[str, Any]]:
+    """Search entities by name, type, or observations content."""
+    b = bank or current_bank
+    results = []
+    
+    for entity_id, entity in memory_banks[b]["nodes"].items():
+        # Skip if entity_type filter doesn't match
+        if entity_type and entity.data.get("type") != entity_type:
+            continue
+        
+        relevance_score = 0.0
+        matched_fields = []
+        
+        # Search in entity ID/name
+        if search_text(query, entity_id, case_sensitive, use_regex):
+            relevance_score = max(relevance_score, calculate_relevance_score(query, entity_id))
+            matched_fields.append("name")
+        
+        # Search in entity type
+        ent_type = entity.data.get("type", "")
+        if search_text(query, ent_type, case_sensitive, use_regex):
+            relevance_score = max(relevance_score, calculate_relevance_score(query, ent_type) * 0.8)
+            matched_fields.append("type")
+        
+        # Search in observations
+        observations = entity.data.get("observations", [])
+        for obs in observations:
+            if search_text(query, obs, case_sensitive, use_regex):
+                obs_score = calculate_relevance_score(query, obs) * 0.6
+                relevance_score = max(relevance_score, obs_score)
+                if "observations" not in matched_fields:
+                    matched_fields.append("observations")
+        
+        # If any match found, add to results
+        if relevance_score > 0:
+            results.append({
+                "entity_id": entity_id,
+                "entity_type": ent_type,
+                "data": entity.data,
+                "relevance_score": relevance_score,
+                "matched_fields": matched_fields,
+                "bank": b
+            })
+    
+    # Sort by relevance score (highest first)
+    results.sort(key=lambda x: x["relevance_score"], reverse=True)
+    return results
+
+def search_relationships(query: str, bank: str = None, relationship_type: str = None,
+                        case_sensitive: bool = False, use_regex: bool = False) -> List[Dict[str, Any]]:
+    """Search relationships by type, context, or metadata."""
+    b = bank or current_bank
+    results = []
+    
+    for edge in memory_banks[b]["edges"]:
+        # Skip if relationship_type filter doesn't match
+        if relationship_type and edge.data.get("type") != relationship_type:
+            continue
+        
+        relevance_score = 0.0
+        matched_fields = []
+        
+        # Search in relationship type
+        rel_type = edge.data.get("type", "")
+        if search_text(query, rel_type, case_sensitive, use_regex):
+            relevance_score = max(relevance_score, calculate_relevance_score(query, rel_type))
+            matched_fields.append("type")
+        
+        # Search in context
+        context = edge.data.get("context", "")
+        if search_text(query, context, case_sensitive, use_regex):
+            relevance_score = max(relevance_score, calculate_relevance_score(query, context) * 0.8)
+            matched_fields.append("context")
+        
+        # Search in source entities
+        if search_text(query, edge.source, case_sensitive, use_regex):
+            relevance_score = max(relevance_score, calculate_relevance_score(query, edge.source) * 0.6)
+            matched_fields.append("from_entity")
+        
+        if search_text(query, edge.target, case_sensitive, use_regex):
+            relevance_score = max(relevance_score, calculate_relevance_score(query, edge.target) * 0.6)
+            matched_fields.append("to_entity")
+        
+        # If any match found, add to results
+        if relevance_score > 0:
+            results.append({
+                "relationship_id": edge.id,
+                "from_entity": edge.source,
+                "to_entity": edge.target,
+                "relationship_type": rel_type,
+                "data": edge.data,
+                "relevance_score": relevance_score,
+                "matched_fields": matched_fields,
+                "bank": b
+            })
+    
+    # Sort by relevance score (highest first)
+    results.sort(key=lambda x: x["relevance_score"], reverse=True)
+    return results
+
+def search_observations(query: str, bank: str = None, entity_id: str = None,
+                       case_sensitive: bool = False, use_regex: bool = False) -> List[Dict[str, Any]]:
+    """Search observations by content or entity."""
+    b = bank or current_bank
+    results = []
+    
+    for observation in memory_banks[b]["observations"]:
+        # Skip if entity_id filter doesn't match
+        if entity_id and observation.entity_id != entity_id:
+            continue
+        
+        relevance_score = 0.0
+        matched_fields = []
+        
+        # Search in observation content
+        if search_text(query, observation.content, case_sensitive, use_regex):
+            relevance_score = max(relevance_score, calculate_relevance_score(query, observation.content))
+            matched_fields.append("content")
+        
+        # Search in entity ID
+        if search_text(query, observation.entity_id, case_sensitive, use_regex):
+            relevance_score = max(relevance_score, calculate_relevance_score(query, observation.entity_id) * 0.7)
+            matched_fields.append("entity_id")
+        
+        # If any match found, add to results
+        if relevance_score > 0:
+            results.append({
+                "observation_id": observation.id,
+                "entity_id": observation.entity_id,
+                "content": observation.content,
+                "timestamp": observation.timestamp,
+                "relevance_score": relevance_score,
+                "matched_fields": matched_fields,
+                "bank": b
+            })
+    
+    # Sort by relevance score (highest first)
+    results.sort(key=lambda x: x["relevance_score"], reverse=True)
+    return results
+
+
+# Search HTTP Endpoints
+
+@app.get("/search/entities")
+def search_entities_endpoint(
+    q: str = Query(..., description="Search query"),
+    bank: str = Query(None, description="Memory bank to search in"),
+    entity_type: str = Query(None, description="Filter by entity type"),
+    case_sensitive: bool = Query(False, description="Case sensitive search"),
+    use_regex: bool = Query(False, description="Use regular expressions"),
+    limit: int = Query(50, description="Maximum number of results")
+):
+    """
+    Search entities by name, type, or observations content.
+    Returns entities ranked by relevance score.
+    """
+    try:
+        results = search_entities(q, bank, entity_type, case_sensitive, use_regex)
+        return {
+            "query": q,
+            "bank": bank or current_bank,
+            "total_results": len(results),
+            "results": results[:limit] if limit else results,
+            "search_parameters": {
+                "entity_type": entity_type,
+                "case_sensitive": case_sensitive,
+                "use_regex": use_regex
+            }
+        }
+    except Exception as e:
+        return {"error": str(e), "query": q}
+
+@app.get("/search/relationships")
+def search_relationships_endpoint(
+    q: str = Query(..., description="Search query"),
+    bank: str = Query(None, description="Memory bank to search in"),
+    relationship_type: str = Query(None, description="Filter by relationship type"),
+    case_sensitive: bool = Query(False, description="Case sensitive search"),
+    use_regex: bool = Query(False, description="Use regular expressions"),
+    limit: int = Query(50, description="Maximum number of results")
+):
+    """
+    Search relationships by type, context, or entity names.
+    Returns relationships ranked by relevance score.
+    """
+    try:
+        results = search_relationships(q, bank, relationship_type, case_sensitive, use_regex)
+        return {
+            "query": q,
+            "bank": bank or current_bank,
+            "total_results": len(results),
+            "results": results[:limit] if limit else results,
+            "search_parameters": {
+                "relationship_type": relationship_type,
+                "case_sensitive": case_sensitive,
+                "use_regex": use_regex
+            }
+        }
+    except Exception as e:
+        return {"error": str(e), "query": q}
+
+@app.get("/search/observations")
+def search_observations_endpoint(
+    q: str = Query(..., description="Search query"),
+    bank: str = Query(None, description="Memory bank to search in"),
+    entity_id: str = Query(None, description="Filter by entity ID"),
+    case_sensitive: bool = Query(False, description="Case sensitive search"),
+    use_regex: bool = Query(False, description="Use regular expressions"),
+    limit: int = Query(50, description="Maximum number of results")
+):
+    """
+    Search observations by content or entity.
+    Returns observations ranked by relevance score.
+    """
+    try:
+        results = search_observations(q, bank, entity_id, case_sensitive, use_regex)
+        return {
+            "query": q,
+            "bank": bank or current_bank,
+            "total_results": len(results),
+            "results": results[:limit] if limit else results,
+            "search_parameters": {
+                "entity_id": entity_id,
+                "case_sensitive": case_sensitive,
+                "use_regex": use_regex
+            }
+        }
+    except Exception as e:
+        return {"error": str(e), "query": q}
+
+@app.get("/search/all")
+def search_all_endpoint(
+    q: str = Query(..., description="Search query"),
+    bank: str = Query(None, description="Memory bank to search in"),
+    case_sensitive: bool = Query(False, description="Case sensitive search"),
+    use_regex: bool = Query(False, description="Use regular expressions"),
+    limit: int = Query(50, description="Maximum number of results per type")
+):
+    """
+    Search across all entities, relationships, and observations.
+    Returns comprehensive results ranked by relevance score.
+    """
+    try:
+        entities = search_entities(q, bank, None, case_sensitive, use_regex)
+        relationships = search_relationships(q, bank, None, case_sensitive, use_regex)
+        observations = search_observations(q, bank, None, case_sensitive, use_regex)
+        
+        # Combine and sort by relevance
+        all_results = []
+        all_results.extend([{"type": "entity", **r} for r in entities])
+        all_results.extend([{"type": "relationship", **r} for r in relationships])
+        all_results.extend([{"type": "observation", **r} for r in observations])
+        
+        all_results.sort(key=lambda x: x["relevance_score"], reverse=True)
+        
+        return {
+            "query": q,
+            "bank": bank or current_bank,
+            "total_results": len(all_results),
+            "results_by_type": {
+                "entities": len(entities),
+                "relationships": len(relationships),
+                "observations": len(observations)
+            },
+            "results": all_results[:limit] if limit else all_results,
+            "search_parameters": {
+                "case_sensitive": case_sensitive,
+                "use_regex": use_regex
+            }
+        }
+    except Exception as e:
+        return {"error": str(e), "query": q}
+
 # New endpoint: ingest long text and update/extend graph in a specific bank
 
 @app.post("/context/ingest")
@@ -1343,6 +1663,69 @@ async def root_post(request: Request):
                                     },
                                     "required": ["text"]
                                 }
+                            },
+                            {
+                                "name": "search_nodes",
+                                "description": "Search entities in the knowledge graph by name, type, or observations content",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "query": {"type": "string", "description": "Search query text"},
+                                        "bank": {"type": "string", "description": "Memory bank to search in"},
+                                        "entity_type": {"type": "string", "description": "Filter by entity type"},
+                                        "case_sensitive": {"type": "boolean", "description": "Case sensitive search"},
+                                        "use_regex": {"type": "boolean", "description": "Use regular expressions"},
+                                        "limit": {"type": "number", "description": "Maximum number of results"}
+                                    },
+                                    "required": ["query"]
+                                }
+                            },
+                            {
+                                "name": "search_relations",
+                                "description": "Search relationships in the knowledge graph by type, context, or entity names",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "query": {"type": "string", "description": "Search query text"},
+                                        "bank": {"type": "string", "description": "Memory bank to search in"},
+                                        "relationship_type": {"type": "string", "description": "Filter by relationship type"},
+                                        "case_sensitive": {"type": "boolean", "description": "Case sensitive search"},
+                                        "use_regex": {"type": "boolean", "description": "Use regular expressions"},
+                                        "limit": {"type": "number", "description": "Maximum number of results"}
+                                    },
+                                    "required": ["query"]
+                                }
+                            },
+                            {
+                                "name": "search_observations",
+                                "description": "Search observations in the knowledge graph by content or entity",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "query": {"type": "string", "description": "Search query text"},
+                                        "bank": {"type": "string", "description": "Memory bank to search in"},
+                                        "entity_id": {"type": "string", "description": "Filter by entity ID"},
+                                        "case_sensitive": {"type": "boolean", "description": "Case sensitive search"},
+                                        "use_regex": {"type": "boolean", "description": "Use regular expressions"},
+                                        "limit": {"type": "number", "description": "Maximum number of results"}
+                                    },
+                                    "required": ["query"]
+                                }
+                            },
+                            {
+                                "name": "search_all",
+                                "description": "Search across all entities, relationships, and observations in the knowledge graph",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "query": {"type": "string", "description": "Search query text"},
+                                        "bank": {"type": "string", "description": "Memory bank to search in"},
+                                        "case_sensitive": {"type": "boolean", "description": "Case sensitive search"},
+                                        "use_regex": {"type": "boolean", "description": "Use regular expressions"},
+                                        "limit": {"type": "number", "description": "Maximum number of results"}
+                                    },
+                                    "required": ["query"]
+                                }
                             }
                         ]
                     }
@@ -1731,6 +2114,120 @@ async def handle_mcp_stdio():
                             ]
                         }
                     }
+                
+                elif tool_name == "search_nodes":
+                    query = arguments.get("query", "")
+                    bank = arguments.get("bank")
+                    entity_type = arguments.get("entity_type")
+                    case_sensitive = arguments.get("case_sensitive", False)
+                    use_regex = arguments.get("use_regex", False)
+                    limit = arguments.get("limit", 50)
+                    
+                    results = search_entities(query, bank, entity_type, case_sensitive, use_regex)
+                    
+                    if limit:
+                        results = results[:limit]
+                    
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Found {len(results)} entities matching '{query}': " + 
+                                           ", ".join([r["entity_id"] for r in results[:10]]) +
+                                           (f" (and {len(results)-10} more)" if len(results) > 10 else "")
+                                }
+                            ]
+                        }
+                    }
+                
+                elif tool_name == "search_relations":
+                    query = arguments.get("query", "")
+                    bank = arguments.get("bank")
+                    relationship_type = arguments.get("relationship_type")
+                    case_sensitive = arguments.get("case_sensitive", False)
+                    use_regex = arguments.get("use_regex", False)
+                    limit = arguments.get("limit", 50)
+                    
+                    results = search_relationships(query, bank, relationship_type, case_sensitive, use_regex)
+                    
+                    if limit:
+                        results = results[:limit]
+                    
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Found {len(results)} relationships matching '{query}': " +
+                                           ", ".join([f"{r['from_entity']} -> {r['to_entity']}" for r in results[:5]]) +
+                                           (f" (and {len(results)-5} more)" if len(results) > 5 else "")
+                                }
+                            ]
+                        }
+                    }
+                
+                elif tool_name == "search_observations":
+                    query = arguments.get("query", "")
+                    bank = arguments.get("bank")
+                    entity_id = arguments.get("entity_id")
+                    case_sensitive = arguments.get("case_sensitive", False)
+                    use_regex = arguments.get("use_regex", False)
+                    limit = arguments.get("limit", 50)
+                    
+                    results = search_observations(query, bank, entity_id, case_sensitive, use_regex)
+                    
+                    if limit:
+                        results = results[:limit]
+                    
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Found {len(results)} observations matching '{query}': " +
+                                           ", ".join([f"{r['entity_id']}: {r['content'][:50]}..." for r in results[:3]]) +
+                                           (f" (and {len(results)-3} more)" if len(results) > 3 else "")
+                                }
+                            ]
+                        }
+                    }
+                
+                elif tool_name == "search_all":
+                    query = arguments.get("query", "")
+                    bank = arguments.get("bank")
+                    case_sensitive = arguments.get("case_sensitive", False)
+                    use_regex = arguments.get("use_regex", False)
+                    limit = arguments.get("limit", 50)
+                    
+                    entities = search_entities(query, bank, None, case_sensitive, use_regex)
+                    relationships = search_relationships(query, bank, None, case_sensitive, use_regex)
+                    observations = search_observations(query, bank, None, case_sensitive, use_regex)
+                    
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Search results for '{query}':\n" +
+                                           f"- {len(entities)} entities\n" +
+                                           f"- {len(relationships)} relationships\n" +
+                                           f"- {len(observations)} observations\n\n" +
+                                           f"Top entities: {', '.join([e['entity_id'] for e in entities[:5]])}\n" +
+                                           "Top relationships: " + ', '.join([f"{r['from_entity']}->{r['to_entity']}" for r in relationships[:3]])
+                                }
+                            ]
+                        }
+                    }
+                
                 else:
                     response = {
                         "jsonrpc": "2.0",

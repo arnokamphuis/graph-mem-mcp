@@ -142,6 +142,168 @@ POST /knowledge/ingest
 }
 ```
 
+## 🔍 NEW: Search Endpoints
+
+### Search Entities
+
+```http
+GET /search/entities?q={query}&bank={bank}&entity_type={type}&case_sensitive={bool}&use_regex={bool}&limit={number}
+```
+
+**Description:** Search entities by name, type, or observations content with advanced relevance scoring.
+
+**Query Parameters:**
+- `q` (required): Search query text
+- `bank` (optional): Memory bank to search in
+- `entity_type` (optional): Filter by entity type (named_entity, technical_term, concept, etc.)
+- `case_sensitive` (optional): Case sensitive search (default: false)
+- `use_regex` (optional): Use regular expressions (default: false)
+- `limit` (optional): Maximum number of results (default: 50)
+
+**Response:**
+```json
+{
+  "query": "Goldman",
+  "bank": "default",
+  "total_results": 2,
+  "results": [
+    {
+      "entity_id": "goldman_sachs",
+      "entity_type": "named_entity",
+      "data": {...},
+      "relevance_score": 0.7,
+      "matched_fields": ["name"],
+      "bank": "default"
+    }
+  ],
+  "search_parameters": {
+    "entity_type": null,
+    "case_sensitive": false,
+    "use_regex": false
+  }
+}
+```
+
+### Search Relationships
+
+```http
+GET /search/relationships?q={query}&bank={bank}&relationship_type={type}&case_sensitive={bool}&use_regex={bool}&limit={number}
+```
+
+**Description:** Search relationships by type, context, or entity names with relevance scoring.
+
+**Query Parameters:**
+- `q` (required): Search query text
+- `bank` (optional): Memory bank to search in
+- `relationship_type` (optional): Filter by relationship type (created, acquired, developed, etc.)
+- `case_sensitive` (optional): Case sensitive search (default: false)
+- `use_regex` (optional): Use regular expressions (default: false)
+- `limit` (optional): Maximum number of results (default: 50)
+
+**Response:**
+```json
+{
+  "query": "acquired",
+  "bank": "default",
+  "total_results": 1,
+  "results": [
+    {
+      "relationship_id": "goldman_sachs-acquired-nn_investment_partners-23",
+      "from_entity": "goldman_sachs",
+      "to_entity": "nn_investment_partners",
+      "relationship_type": "acquired",
+      "data": {...},
+      "relevance_score": 1.04,
+      "matched_fields": ["type", "context"],
+      "bank": "default"
+    }
+  ]
+}
+```
+
+### Search Observations
+
+```http
+GET /search/observations?q={query}&bank={bank}&entity_id={id}&case_sensitive={bool}&use_regex={bool}&limit={number}
+```
+
+**Description:** Search observations by content or entity with advanced text matching.
+
+**Query Parameters:**
+- `q` (required): Search query text
+- `bank` (optional): Memory bank to search in
+- `entity_id` (optional): Filter by specific entity ID
+- `case_sensitive` (optional): Case sensitive search (default: false)
+- `use_regex` (optional): Use regular expressions (default: false)
+- `limit` (optional): Maximum number of results (default: 50)
+
+**Response:**
+```json
+{
+  "query": "banking",
+  "bank": "default",
+  "total_results": 5,
+  "results": [
+    {
+      "observation_id": "33a9d754-9673-430d-be2a-910f9f6b46d4",
+      "entity_id": "marcus_goldman",
+      "content": "Found in context: \"retail banking in 2016\"",
+      "timestamp": "2025-07-19T14:19:09.670997",
+      "relevance_score": 1.3,
+      "matched_fields": ["content"],
+      "bank": "default"
+    }
+  ]
+}
+```
+
+### Search All (Universal Search)
+
+```http
+GET /search/all?q={query}&bank={bank}&case_sensitive={bool}&use_regex={bool}&limit={number}
+```
+
+**Description:** Search across all entities, relationships, and observations with unified results.
+
+**Query Parameters:**
+- `q` (required): Search query text
+- `bank` (optional): Memory bank to search in
+- `case_sensitive` (optional): Case sensitive search (default: false)
+- `use_regex` (optional): Use regular expressions (default: false)
+- `limit` (optional): Maximum number of results per type (default: 50)
+
+**Response:**
+```json
+{
+  "query": "Marcus",
+  "bank": "default",
+  "total_results": 13,
+  "results_by_type": {
+    "entities": 2,
+    "relationships": 4,
+    "observations": 7
+  },
+  "results": [
+    {
+      "type": "entity",
+      "entity_id": "marcus",
+      "relevance_score": 1.0,
+      "matched_fields": ["name"],
+      "bank": "default"
+    },
+    {
+      "type": "relationship",
+      "relationship_id": "they-developed-marcus-18",
+      "from_entity": "they",
+      "to_entity": "marcus",
+      "relevance_score": 1.04,
+      "matched_fields": ["context", "to_entity"],
+      "bank": "default"
+    }
+  ]
+}
+```
+
 ## Memory Banks
 
 ### List Banks

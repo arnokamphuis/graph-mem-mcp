@@ -214,6 +214,45 @@ No need to start the server manually - VS Code will manage the container lifecyc
 3. **create_relations**: Create relationships between entities
 4. **sequential_thinking**: Add reasoning steps
 5. **ingest_knowledge**: 🆕 **Advanced knowledge graph creation from large text with sophisticated entity and relationship extraction**
+6. **search_nodes**: 🆕 **Search entities by name, type, or observations content with relevance scoring**
+7. **search_relations**: 🆕 **Search relationships by type, context, or entity names with filtering**
+8. **search_observations**: 🆕 **Search observations by content or entity with advanced matching**
+9. **search_all**: 🆕 **Comprehensive search across all entities, relationships, and observations**
+
+## 🔍 **NEW: Comprehensive Search Capabilities**
+
+The server now includes **powerful search functionality** to find information across your knowledge graphs:
+
+### Search Features:
+- **🎯 Relevance Scoring**: Results ranked by relevance (1.0 = perfect match, 0.3-0.7 = partial matches)
+- **📝 Multiple Match Types**: Exact matches, word matches, partial text matches
+- **🔤 Text Options**: Case-sensitive/insensitive search, regular expression support
+- **🏷️ Advanced Filtering**: Filter by entity type, relationship type, or specific memory banks
+- **⚡ Cross-Bank Search**: Search across all memory banks or target specific ones
+- **📊 Rich Results**: Includes matched fields, relevance scores, and comprehensive metadata
+
+### Search HTTP Endpoints:
+- **Entity Search**: `GET /search/entities?q=searchterm`
+- **Relationship Search**: `GET /search/relationships?q=searchterm`
+- **Observation Search**: `GET /search/observations?q=searchterm`
+- **Universal Search**: `GET /search/all?q=searchterm`
+
+### Example Search Usage:
+```bash
+# Search for entities related to Goldman Sachs
+curl "http://localhost:10642/search/entities?q=Goldman&limit=10"
+
+# Search for acquisition relationships
+curl "http://localhost:10642/search/relationships?q=acquired"
+
+# Comprehensive search across all data types
+curl "http://localhost:10642/search/all?q=Marcus&case_sensitive=false"
+
+# Advanced regex search for dates
+curl "http://localhost:10642/search/observations?q=\\d{4}&use_regex=true"
+```
+
+**Example Result**: Searching for "Marcus" found 13 results across entities (2), relationships (4), and observations (7), including Marcus Goldman (founder), Marcus platform (banking product), and all related contexts with confidence scores!
 
 ### Enhanced Knowledge Graph Creation
 
