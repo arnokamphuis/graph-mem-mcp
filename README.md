@@ -49,41 +49,88 @@ cd graph_mem
 # Build the container
 podman build -t graph-mcp-server ./mcp_server
 
-# Run with persistent storage
+# Option A: Run with persistent storage (HTTP only)
 podman run -d --name graph-mcp-server -p 10642:10642 -v graph-mcp-memory:/data graph-mcp-server
+
+# Option B: Run with dual-mode support (stdio + HTTP)
+podman run -d --name graph-mcp-server -p 10462:10642 -v graph-mcp-memory:/data graph-mcp-server python main.py --mcp-with-http
 ```
 
 ### 2. Configure VS Code Agent Chat
 
+**Option A: HTTP-only Mode**
 Create or update your VS Code `mcp.json` configuration:
 
 ```json
 {
-  "my-mcp-server": {
+  "graph-memory": {
     "url": "http://localhost:10642",
     "type": "http"
   }
 }
 ```
 
+**Option B: Dual-mode (Recommended)**
+For both VS Code stdio communication AND external HTTP access:
+
+```json
+{
+  "graph-memory": {
+    "command": "podman",
+    "args": [
+      "run",
+      "-i",
+      "--rm",
+      "-p",
+      "10462:10642",
+      "-v",
+      "graph-mcp-memory:/data",
+      "graph-mcp-server",
+      "python",
+      "main.py",
+      "--mcp-with-http"
+    ],
+    "type": "stdio"
+  }
+}
+```
+
+**🔄 Dual-mode Benefits:**
+- VS Code communicates efficiently via stdio
+- External processes can access the same server instance via HTTP at `http://localhost:10462`
+- Both interfaces share the same memory banks and data
+- No need to run separate server instances
+
 ### 3. Test the Server
 
+**HTTP-only Mode:**
 ```bash
 # Check server status
 curl http://localhost:10642/
 
-# Create an entity via MCP
+# Create an entity via REST API
 curl -X POST http://localhost:10642/entities \
   -H "Content-Type: application/json" \
   -d '{"id": "test-entity", "data": {"type": "example"}}'
+```
+
+**Dual-mode Testing:**
+```bash
+# Test HTTP interface (external access)
+curl http://localhost:10462/
+
+# Test same functionality as VS Code will use
+# (VS Code uses stdio, but data is shared)
 
 # Advanced: Ingest large text for knowledge graph creation
-curl -X POST http://localhost:10642/knowledge/ingest \
+curl -X POST http://localhost:10462/knowledge/ingest \
   -H "Content-Type: application/json" \
   -d '{"text": "Your large text here...", "source": "document_name", "bank_name": "default"}'
 
-# View interactive visualization
-open http://localhost:10642/banks/default/visualize
+# View interactive visualization (works with both modes)
+# HTTP-only mode: http://localhost:10642/banks/default/visualize  
+# Dual-mode: http://localhost:10462/banks/default/visualize
+open http://localhost:10462/banks/default/visualize
 ```
 
 ## 🎨 **NEW: Interactive Knowledge Graph Visualization**
@@ -210,6 +257,44 @@ To use this MCP server with VS Code Agent Chat, create or update your MCP config
 - `%APPDATA%\Code\User\globalStorage\rooveterinaryinc.roo-cline\settings\cline_mcp_settings.json`
 - Or look for MCP settings in VS Code's Agent Chat extension settings
 
+**Recommended: Dual-mode Configuration**
+```json
+{
+  "mcpServers": {
+    "graph-memory": {
+      "command": "podman",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-p",
+        "10462:10642",
+        "-v",
+        "graph-mcp-memory:/data",
+        "graph-mcp-server",
+        "python",
+        "main.py",
+        "--mcp-with-http"
+      ],
+      "type": "stdio"
+    }
+  }
+}
+```
+
+**Alternative: HTTP-only Mode**
+```json
+{
+  "mcpServers": {
+    "graph-memory": {
+      "url": "http://localhost:10642",
+      "type": "http"
+    }
+  }
+}
+```
+
+**Legacy: stdio-only Mode**
 ```json
 {
   "mcpServers": {
@@ -233,6 +318,11 @@ To use this MCP server with VS Code Agent Chat, create or update your MCP config
 ```
 
 No need to start the server manually - VS Code will manage the container lifecycle automatically.
+
+**🎯 Configuration Comparison:**
+- **Dual-mode**: VS Code gets efficient stdio + external HTTP access on port 10462
+- **HTTP-only**: Universal HTTP access but VS Code must use HTTP protocol  
+- **stdio-only**: VS Code only, no external access
 
 ### MCP Tools Available
 

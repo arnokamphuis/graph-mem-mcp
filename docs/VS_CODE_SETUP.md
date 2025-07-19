@@ -5,24 +5,101 @@ Complete guide for configuring the Graph Memory MCP Server with VS Code Agent Ch
 ## Prerequisites
 
 - VS Code with Agent Chat enabled
-- Graph Memory MCP Server running (see [Deployment Guide](./DEPLOYMENT.md))
+- Graph Memory MCP Server container built (see [Deployment Guide](./DEPLOYMENT.md))
 - Basic understanding of MCP configuration
 
 ## Configuration Steps
 
-### 1. Start the MCP Server
+### 1. Choose Your Mode
 
-Ensure your server is running:
+The Graph Memory MCP Server supports three modes:
 
-```bash
-# Start with Podman
-podman start graph-mcp-server
+- **🔄 Dual-mode (Recommended)**: VS Code uses stdio + external HTTP access
+- **🌐 HTTP-only**: Universal HTTP access for all clients
+- **📱 stdio-only**: VS Code only, no external access
 
-# Verify it's running
-curl http://localhost:10642/
+### 2. Option A: Dual-mode Configuration (Recommended)
+
+This mode provides VS Code with efficient stdio communication while also exposing HTTP access for external processes.
+
+**Benefits:**
+- VS Code gets optimal stdio performance
+- External tools can access same server on port 10462
+- Both interfaces share the same data
+- Single container instance
+
+```json
+{
+  "servers": {
+    "graph-memory": {
+      "command": "podman",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-p",
+        "10462:10642",
+        "-v",
+        "graph-mcp-memory:/data",
+        "graph-mcp-server",
+        "python",
+        "main.py",
+        "--mcp-with-http"
+      ],
+      "type": "stdio"
+    }
+  }
+}
 ```
 
-### 2. Create MCP Configuration
+### 3. Option B: HTTP-only Mode
+
+Standard HTTP configuration if you prefer all clients to use HTTP.
+
+**Start server manually:**
+```bash
+podman run -d --name graph-mcp-server -p 10642:10642 -v graph-mcp-memory:/data graph-mcp-server
+```
+
+**Configuration:**
+```json
+{
+  "servers": {
+    "graph-memory": {
+      "url": "http://localhost:10642",
+      "type": "http"
+    }
+  }
+}
+```
+
+### 4. Option C: stdio-only Mode (Legacy)
+
+VS Code only, no external access.
+
+```json
+{
+  "servers": {
+    "graph-memory": {
+      "command": "podman",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-v",
+        "graph-mcp-memory:/data",
+        "graph-mcp-server",
+        "python",
+        "main.py",
+        "--mcp"
+      ],
+      "type": "stdio"
+    }
+  }
+}
+```
+
+### 5. MCP Configuration File Location
 
 Create or update your VS Code MCP configuration file. The location depends on your system:
 
@@ -41,43 +118,15 @@ Create or update your VS Code MCP configuration file. The location depends on yo
 ~/.config/Code/User/mcp.json
 ```
 
-### 3. Add Server Configuration
-
-Add the Graph Memory MCP Server to your `mcp.json`:
-
-```json
-{
-  "my-mcp-server": {
-    "url": "http://localhost:10642",
-    "type": "http"
-  }
-}
-```
-
-### 4. Legacy Configuration (Alternative)
-
-If you need to use the legacy stdio-based connection:
-
-```json
-{
-  "mcp-server-graph-memory": {
-    "command": "curl",
-    "args": [
-      "-N",
-      "-H", "Accept: text/event-stream",
-      "http://localhost:10642/"
-    ]
-  }
-}
-```
-
-### 5. Restart VS Code
+### 6. Restart VS Code
 
 After updating the configuration:
 
 1. Save the `mcp.json` file
-2. Restart VS Code completely
+2. Restart VS Code completely  
 3. The MCP server should be automatically detected
+
+**For dual-mode:** VS Code manages the container AND exposes HTTP on port 10462
 
 ## Verification
 
