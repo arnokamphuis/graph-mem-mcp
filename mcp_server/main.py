@@ -279,6 +279,33 @@ def delete_bank(op: BankOp):
     save_memory_banks()  # Persist the change
     return {"status": "success", "deleted": op.bank, "current": current_bank}
 
+@app.post("/banks/clear")
+def clear_bank(op: BankOp):
+    """
+    Clear all entities, relationships, and observations from a bank.
+    Request body: {"bank": "bank_name"}
+    Response: {"status": "success", "cleared": "bank_name", "entities_deleted": N, "relations_deleted": N, "observations_deleted": N}
+    """
+    b = op.bank or current_bank
+    entities_count = len(memory_banks[b]["nodes"])
+    relations_count = len(memory_banks[b]["edges"])
+    observations_count = len(memory_banks[b]["observations"])
+    
+    # Clear all data
+    memory_banks[b]["nodes"].clear()
+    memory_banks[b]["edges"].clear()
+    memory_banks[b]["observations"].clear()
+    memory_banks[b]["reasoning_steps"].clear()
+    
+    save_memory_banks()  # Persist the changes
+    return {
+        "status": "success", 
+        "cleared": b, 
+        "entities_deleted": entities_count,
+        "relations_deleted": relations_count, 
+        "observations_deleted": observations_count
+    }
+
 # Bank-aware entity endpoints
 
 @app.post("/entities")
@@ -3289,7 +3316,13 @@ async def handle_mcp_stdio():
                     use_regex = arguments.get("use_regex", False)
                     limit = arguments.get("limit", 50)
                     
-                    results = search_entities(query, bank, entity_type, case_sensitive, use_regex)
+                    # Handle special case of listing all entities
+                    if query == "*" or query == "":
+                        b = bank or current_bank
+                        entity_ids = list(memory_banks[b]["nodes"].keys())
+                        results = [{"entity_id": eid} for eid in entity_ids]
+                    else:
+                        results = search_entities(query, bank, entity_type, case_sensitive, use_regex)
                     
                     if limit:
                         results = results[:limit]
@@ -3398,23 +3431,30 @@ async def handle_mcp_stdio():
                     entity_names = arguments.get("entityNames", [])
                     deleted_count = 0
                     
-                    for entity_name in entity_names:
-                        if entity_name in memory_banks[current_bank]["nodes"]:
-                            # Remove the entity
-                            del memory_banks[current_bank]["nodes"][entity_name]
-                            deleted_count += 1
-                            
-                            # Remove related edges
-                            memory_banks[current_bank]["edges"] = [
-                                edge for edge in memory_banks[current_bank]["edges"]
-                                if edge.source != entity_name and edge.target != entity_name
-                            ]
-                            
-                            # Remove related observations
-                            memory_banks[current_bank]["observations"] = [
-                                obs for obs in memory_banks[current_bank]["observations"]
-                                if obs.entity_id != entity_name
-                            ]
+                    # Handle special case of deleting all entities
+                    if entity_names == ["ALL"] or not entity_names:
+                        deleted_count = len(memory_banks[current_bank]["nodes"])
+                        memory_banks[current_bank]["nodes"].clear()
+                        memory_banks[current_bank]["edges"].clear()
+                        memory_banks[current_bank]["observations"].clear()
+                    else:
+                        for entity_name in entity_names:
+                            if entity_name in memory_banks[current_bank]["nodes"]:
+                                # Remove the entity
+                                del memory_banks[current_bank]["nodes"][entity_name]
+                                deleted_count += 1
+                                
+                                # Remove related edges
+                                memory_banks[current_bank]["edges"] = [
+                                    edge for edge in memory_banks[current_bank]["edges"]
+                                    if edge.source != entity_name and edge.target != entity_name
+                                ]
+                                
+                                # Remove related observations
+                                memory_banks[current_bank]["observations"] = [
+                                    obs for obs in memory_banks[current_bank]["observations"]
+                                    if obs.entity_id != entity_name
+                                ]
                     
                     save_memory_banks()
                     
@@ -3536,7 +3576,13 @@ async def handle_mcp_stdio():
                     names = arguments.get("names", [])
                     found_nodes = []
                     
-                    for name in names:
+                    # Handle special case of opening all nodes
+                    if names == ["ALL"] or not names:
+                        entity_names = list(memory_banks[current_bank]["nodes"].keys())
+                    else:
+                        entity_names = names
+                    
+                    for name in entity_names:
                         if name in memory_banks[current_bank]["nodes"]:
                             node = memory_banks[current_bank]["nodes"][name]
                             # Get related observations
