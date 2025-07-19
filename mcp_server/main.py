@@ -640,7 +640,9 @@ def search_entities(query: str, bank: str = None, entity_type: str = None,
 
 def search_relationships(query: str, bank: str = None, relationship_type: str = None,
                         case_sensitive: bool = False, use_regex: bool = False) -> List[Dict[str, Any]]:
-    """Search relationships by type, context, or metadata."""
+    """Search relationships by type, context, or entity names.
+    Returns relationships ranked by relevance score.
+    """
     b = bank or current_bank
     results = []
     
@@ -929,21 +931,87 @@ def extract_advanced_entities(text: str):
     """Enhanced entity extraction with multiple patterns and types"""
     entities = {}
     
+    # Common stop words to exclude from entity extraction
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'been', 'be', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
     # 1. Named entities (capitalized sequences)
     named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
     for entity in named_entities:
-        if len(entity) > 2:  # Filter out short words
+        if is_valid_entity(entity):  # Use the validation function
             entities[entity] = {"type": "named_entity", "confidence": 0.8}
     
     # 2. Technical terms (words with specific patterns)
     technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
     for term in technical_terms:
-        entities[term] = {"type": "technical_term", "confidence": 0.7}
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
     
     # 3. Quoted concepts
     quoted_concepts = re.findall(r'"([^"]*)"', text)
     for concept in quoted_concepts:
-        if len(concept.strip()) > 2:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    def is_valid_entity(entity_text):
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and entity_lower not in stop_words and not entity_lower.isdigit() and len(entity_text.strip()) > 1)
+
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if len(sentence) < 10:
+            continue
+        sentence_entities = []
+        for entity in entities.keys():
+            if entity.lower() in sentence.lower() and is_valid_entity(entity):
+                sentence_entities.append(entity)
+        for i, entity1 in enumerate(sentence_entities):
+            for entity2 in sentence_entities[i+1:]:
+                pattern = rf'\b{re.escape(entity1.lower())}.*?\b(\w+(?:s|ed|ing)?)\b.*?{re.escape(entity2.lower())}'
+                matches = re.findall(pattern, sentence.lower())
+                if matches:
+                    for action in matches:
+                        if len(action) > 2 and is_valid_entity(action):
+                            relationships.append({
+                                "from": entity1,
+                                "to": entity2,
+                                "type": action,
+                                "context": sentence[:100] + "..." if len(sentence) > 100 else sentence,
+                                "confidence": 0.6
+                            })
+                else:
+                    relationships.append({
+                        "from": entity1,
+                        "to": entity2,
+                        "type": "related_to",
+                        "context": sentence[:100] + "..." if len(sentence) > 100 else sentence,
+                        "confidence": 0.4
+                    })
             entities[concept] = {"type": "concept", "confidence": 0.9}
     
     # 4. Email addresses and URLs
@@ -968,42 +1036,1576 @@ def extract_advanced_entities(text: str):
     return entities
 
 def extract_relationships(text: str, entities: dict):
-    """Extract relationships between entities with context"""
+    """Extract relationships between entities with context, filtering out stop words"""
     relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'been', 'be', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
     
-    # Split text into sentences for relationship extraction
-    sentences = re.split(r'[.!?]+', text)
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
     
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'been', 'be', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'been', 'be', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'been', 'be', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'been', 'be', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if is_valid_entity(entity):  # Use the validation function
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        if is_valid_entity(term):
+            entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if is_valid_entity(concept):
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context, filtering out stop words"""
+    relationships = []
+    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    stop_words = {
+        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
+    }
+    
+    def is_valid_entity(entity_text):
+        """Check if entity should be included (not a stop word or too short)"""
+        entity_lower = entity_text.lower().strip()
+        return (len(entity_lower) > 2 and 
+                entity_lower not in stop_words and
+                not entity_lower.isdigit() and
+                len(entity_text.strip()) > 1)
+    
+    # Extract relationships from text
+    sentences = re.split(r'[.!?]', text)
     for sentence in sentences:
         sentence = sentence.strip()
-        if len(sentence) < 10:  # Skip very short sentences
+        if len(sentence) < 10:
             continue
-            
-        # Find entities in this sentence
+        
         sentence_entities = []
         for entity in entities.keys():
-            if entity.lower() in sentence.lower():
+            if entity.lower() in sentence.lower() and is_valid_entity(entity):
                 sentence_entities.append(entity)
         
-        # Extract relationships between entities in the same sentence
         for i, entity1 in enumerate(sentence_entities):
             for entity2 in sentence_entities[i+1:]:
-                # Look for action words between entities
-                pattern = rf'\b{re.escape(entity1.lower())}.*?\b(\w+(?:s|ed|ing)?)\b.*?{re.escape(entity2.lower())}'
-                matches = re.findall(pattern, sentence.lower())
-                
-                if matches:
-                    for action in matches:
-                        if len(action) > 2:  # Filter short words
-                            relationships.append({
-                                "from": entity1,
-                                "to": entity2,
-                                "type": action,
-                                "context": sentence[:100] + "..." if len(sentence) > 100 else sentence,
-                                "confidence": 0.6
-                            })
-                else:
-                    # Default relationship for co-occurrence
+                if is_valid_entity(entity1) and is_valid_entity(entity2):
                     relationships.append({
                         "from": entity1,
                         "to": entity2,
@@ -1013,1634 +2615,6 @@ def extract_relationships(text: str, entities: dict):
                     })
     
     return relationships
-
-@app.post("/knowledge/ingest")
-def ingest_knowledge_graph(payload: KnowledgeIngest = Body(...)):
-    """
-    Advanced knowledge graph creation from large text with sophisticated entity and relationship extraction.
-    
-    Request body: {
-        "text": "Large text content...",
-        "bank": "bank_name",
-        "source": "document_name",
-        "extract_entities": true,
-        "extract_relationships": true,
-        "create_observations": true
-    }
-    
-    Response: {
-        "status": "success",
-        "entities_created": 15,
-        "relationships_created": 8,
-        "observations_created": 23,
-        "processing_stats": {...},
-        "bank": "bank_name"
-    }
-    """
-    text = payload.text
-    b = payload.bank or current_bank
-    source = payload.source
-    
-    processing_stats = {
-        "text_length": len(text),
-        "sentences": len(re.split(r'[.!?]+', text)),
-        "words": len(text.split()),
-        "processing_time": datetime.now().isoformat()
-    }
-    
-    entities_created = 0
-    relationships_created = 0
-    observations_created = 0
-    
-    # Extract entities with advanced patterns
-    if payload.extract_entities:
-        entities = extract_advanced_entities(text)
-        
-        for entity_name, entity_info in entities.items():
-            # Check for similar existing entities to prevent duplicates
-            similar_entity_id = find_similar_entity(entity_name, b, similarity_threshold=0.85)
-            
-            if similar_entity_id:
-                # Use existing similar entity instead of creating duplicate
-                entity_id = similar_entity_id
-                # Optionally update confidence if this extraction has higher confidence
-                existing_node = memory_banks[b]["nodes"][entity_id]
-                if entity_info["confidence"] > existing_node.data.get("confidence", 0):
-                    existing_node.data["confidence"] = entity_info["confidence"]
-            else:
-                # Create new entity if no similar entity found
-                entity_id = entity_name.replace(" ", "_").lower()
-                node = Node(
-                    id=entity_id,
-                    data={
-                        "name": entity_name,
-                        "type": entity_info["type"],
-                        "confidence": entity_info["confidence"],
-                        "source": source,
-                        "extracted_from": "text_analysis",
-                        "created_at": datetime.now().isoformat()
-                    }
-                )
-                memory_banks[b]["nodes"][entity_id] = node
-                entities_created += 1
-            
-            # Create observation with source text context
-            if payload.create_observations:
-                # Find context around the entity in the text
-                pattern = rf'(.{{0,50}}\b{re.escape(entity_name)}\b.{{0,50}})'
-                contexts = re.findall(pattern, text, re.IGNORECASE)
-                
-                for context in contexts[:3]:  # Limit to 3 contexts per entity
-                    obs = Observation(
-                        id=str(uuid.uuid4()),
-                        entity_id=entity_id,
-                        content=f"Found in context: \"{context.strip()}\"",
-                        timestamp=datetime.now().isoformat()
-                    )
-                    memory_banks[b]["observations"].append(obs)
-                    observations_created += 1
-        
-        # Extract relationships
-        if payload.extract_relationships and entities:
-            relationships = extract_relationships(text, entities)
-            
-            for rel in relationships:
-                from_id = rel["from"].replace(" ", "_").lower()
-                to_id = rel["to"].replace(" ", "_").lower()
-                
-                # Only create relationship if both entities exist
-                if from_id in memory_banks[b]["nodes"] and to_id in memory_banks[b]["nodes"]:
-                    edge = Edge(
-                        source=from_id,
-                        target=to_id,
-                        data={
-                            "type": rel["type"],
-                            "context": rel["context"],
-                            "confidence": rel["confidence"],
-                            "source": source,
-                            "extracted_from": "text_analysis",
-                            "created_at": datetime.now().isoformat()
-                        }
-                    )
-                    edge.id = f"{from_id}-{rel['type']}-{to_id}-{len(memory_banks[b]['edges'])}"
-                    memory_banks[b]["edges"].append(edge)
-                    relationships_created += 1
-    
-    # Save all changes
-    save_memory_banks()
-    
-    return {
-        "status": "success",
-        "entities_created": entities_created,
-        "relationships_created": relationships_created,
-        "observations_created": observations_created,
-        "processing_stats": processing_stats,
-        "bank": b
-    }
-
-
-@app.get("/context/retrieve")
-def retrieve_context(bank: str = Query(None)):
-    """
-    Retrieve all context (entities, relations, observations, reasoning steps) from the selected or specified bank.
-    Query param: bank (optional)
-    Response: {"entities": [...], "relations": [...], "observations": [...], "reasoning_steps": [...]}
-    """
-    b = bank or current_bank
-    return {
-        "entities": [n.dict() for n in memory_banks[b]["nodes"].values()],
-        "relations": [e.dict() for e in memory_banks[b]["edges"]],
-        "observations": [o.dict() for o in memory_banks[b]["observations"]],
-        "reasoning_steps": [s.dict() for s in memory_banks[b]["reasoning_steps"]]
-    }
-
-# Graph visualization endpoints
-
-@app.get("/banks/{bank}/graph-data")
-def get_graph_data(bank: str):
-    """
-    Get graph data in vis.js network format for visualization.
-    Returns nodes and edges formatted for interactive graph visualization.
-    """
-    if bank not in memory_banks:
-        return {"error": "Bank not found"}
-    
-    nodes = []
-    edges = []
-    
-    # Convert entities to vis.js nodes
-    for node_id, node in memory_banks[bank]["nodes"].items():
-        # Determine node styling based on entity type
-        entity_type = node.data.get("type", "node")
-        confidence = node.data.get("confidence", 0.5)
-        
-        # Color coding for different entity types
-        color_map = {
-            "named_entity": "#4A90E2",  # Blue
-            "technical_term": "#7ED321", # Green  
-            "concept": "#9013FE",       # Purple
-            "email": "#FF6B35",         # Orange
-            "url": "#FF6B35",           # Orange
-            "measurement": "#F5A623",   # Yellow
-            "date": "#50E3C2",          # Teal
-            "node": "#B8E986"           # Light green (default)
-        }
-        
-        # Shape coding
-        shape_map = {
-            "named_entity": "dot",
-            "technical_term": "square", 
-            "concept": "diamond",
-            "email": "triangle",
-            "url": "triangle",
-            "measurement": "box",
-            "date": "ellipse",
-            "node": "dot"
-        }
-        
-        node_data = {
-            "id": node_id,
-            "label": node.data.get("name", node_id),
-            "title": f"Type: {entity_type}<br/>Confidence: {confidence:.2f}<br/>Source: {node.data.get('source', 'N/A')}",
-            "color": {
-                "background": color_map.get(entity_type, "#B8E986"),
-                "border": "#2B7CE9",
-                "highlight": {"background": "#FFD700", "border": "#FFA500"}
-            },
-            "shape": shape_map.get(entity_type, "dot"),
-            "size": 10 + (confidence * 20),  # Size based on confidence
-            "font": {"size": 12 + (confidence * 8)},
-            "metadata": node.data
-        }
-        nodes.append(node_data)
-    
-    # Convert relationships to vis.js edges  
-    for edge in memory_banks[bank]["edges"]:
-        relationship_type = edge.data.get("type", "relation")
-        confidence = edge.data.get("confidence", 0.5)
-        
-        # Color coding for relationship types
-        edge_color_map = {
-            "created": "#E74C3C",       # Red
-            "developed": "#E67E22",     # Orange
-            "leads": "#3498DB",         # Blue
-            "known": "#9B59B6",        # Purple
-            "like": "#1ABC9C",         # Teal
-            "work": "#F39C12",         # Yellow
-            "related_to": "#95A5A6",   # Gray
-            "relation": "#BDC3C7"      # Light gray (default)
-        }
-        
-        edge_data = {
-            "id": edge.id,
-            "from": edge.source,
-            "to": edge.target,
-            "label": relationship_type,
-            "title": f"Type: {relationship_type}<br/>Confidence: {confidence:.2f}<br/>Context: {edge.data.get('context', 'N/A')[:100]}...",
-            "color": {
-                "color": edge_color_map.get(relationship_type, "#BDC3C7"),
-                "highlight": "#FFD700"
-            },
-            "width": 1 + (confidence * 4),  # Width based on confidence
-            "arrows": {"to": {"enabled": True, "scaleFactor": 1}},
-            "smooth": {"type": "continuous"},
-            "metadata": edge.data
-        }
-        edges.append(edge_data)
-    
-    return {
-        "nodes": nodes,
-        "edges": edges,
-        "stats": {
-            "total_nodes": len(nodes),
-            "total_edges": len(edges),
-            "entity_types": len(set(node.data.get("type", "node") for node in memory_banks[bank]["nodes"].values())),
-            "relationship_types": len(set(edge.data.get("type", "relation") for edge in memory_banks[bank]["edges"]))
-        }
-    }
-
-@app.get("/banks/{bank}/visualize")
-def visualize_graph(bank: str):
-    """
-    Serve interactive graph visualization page for a specific memory bank.
-    """
-    if bank not in memory_banks:
-        return JSONResponse(content={"error": "Bank not found"}, status_code=404)
-    
-    # Modern HTML template with vis.js network visualization
-    html_content = f"""
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Knowledge Graph Visualization - Bank: {bank}</title>
-    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <style type="text/css">
-        * {{
-            box-sizing: border-box;
-        }}
-        
-        :root {{
-            --primary-color: #667eea;
-            --primary-dark: #5a67d8;
-            --secondary-color: #764ba2;
-            --accent-color: #f093fb;
-            --success-color: #48bb78;
-            --warning-color: #ed8936;
-            --danger-color: #f56565;
-            --gray-50: #f9fafb;
-            --gray-100: #f3f4f6;
-            --gray-200: #e5e7eb;
-            --gray-300: #d1d5db;
-            --gray-400: #9ca3af;
-            --gray-500: #6b7280;
-            --gray-600: #4b5563;
-            --gray-700: #374151;
-            --gray-800: #1f2937;
-            --gray-900: #111827;
-            --white: #ffffff;
-            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-            --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-        }}
-        
-        body {{
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            margin: 0;
-            padding: 0;
-            background: linear-gradient(135deg, var(--gray-50) 0%, var(--gray-100) 100%);
-            min-height: 100vh;
-            color: var(--gray-800);
-            line-height: 1.6;
-        }}
-        
-        .container {{
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 1.5rem;
-        }}
-        
-        .header {{
-            text-align: center;
-            margin-bottom: 2rem;
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
-            color: white;
-            padding: 2rem;
-            border-radius: 1rem;
-            box-shadow: var(--shadow-lg);
-        }}
-        
-        .header h1 {{
-            margin: 0 0 0.5rem 0;
-            font-size: 2.5rem;
-            font-weight: 700;
-            background: linear-gradient(45deg, #ffffff, #e2e8f0);
-            background-clip: text;
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }}
-        
-        .header h2 {{
-            margin: 0;
-            font-size: 1.25rem;
-            font-weight: 500;
-            opacity: 0.9;
-        }}
-        
-        .controls-container {{
-            background: var(--white);
-            border-radius: 1rem;
-            padding: 1.5rem;
-            margin-bottom: 2rem;
-            box-shadow: var(--shadow-md);
-            border: 1px solid var(--gray-200);
-        }}
-        
-        .controls-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 1.5rem;
-            align-items: start;
-        }}
-        
-        .control-group {{
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }}
-        
-        .control-group label {{
-            font-weight: 600;
-            color: var(--gray-700);
-            font-size: 0.875rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }}
-        
-        .control-row {{
-            display: flex;
-            gap: 0.5rem;
-            align-items: center;
-        }}
-        
-        .btn {{
-            padding: 0.75rem 1rem;
-            border: none;
-            border-radius: 0.5rem;
-            font-weight: 500;
-            font-size: 0.875rem;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            text-decoration: none;
-            white-space: nowrap;
-        }}
-        
-        .btn:hover {{
-            transform: translateY(-1px);
-            box-shadow: var(--shadow-md);
-        }}
-        
-        .btn-primary {{
-            background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
-            color: white;
-        }}
-        
-        .btn-secondary {{
-            background: linear-gradient(135deg, var(--secondary-color), #5a4fb3);
-            color: white;
-        }}
-        
-        .btn-success {{
-            background: linear-gradient(135deg, var(--success-color), #38a169);
-            color: white;
-        }}
-        
-        .btn-warning {{
-            background: linear-gradient(135deg, var(--warning-color), #dd6b20);
-            color: white;
-        }}
-        
-        .btn-danger {{
-            background: linear-gradient(135deg, var(--danger-color), #e53e3e);
-            color: white;
-        }}
-        
-        .btn-outline {{
-            background: transparent;
-            color: var(--gray-600);
-            border: 2px solid var(--gray-300);
-        }}
-        
-        .btn-outline:hover {{
-            background: var(--gray-50);
-            border-color: var(--gray-400);
-        }}
-        
-        .form-input, .form-select {{
-            padding: 0.75rem;
-            border: 2px solid var(--gray-300);
-            border-radius: 0.5rem;
-            font-size: 0.875rem;
-            background: white;
-            transition: all 0.2s ease;
-            width: 100%;
-        }}
-        
-        .form-input:focus, .form-select:focus {{
-            outline: none;
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }}
-        
-        .bank-selector {{
-            background: linear-gradient(135deg, #e0f2fe 0%, #b3e5fc 100%);
-            padding: 1rem;
-            border-radius: 0.75rem;
-            border: 2px solid var(--primary-color);
-        }}
-        
-        .network-container {{
-            background: var(--white);
-            border-radius: 1rem;
-            overflow: hidden;
-            box-shadow: var(--shadow-lg);
-            border: 1px solid var(--gray-200);
-        }}
-        
-        #mynetworkid {{
-            width: 100%;
-            height: 70vh;
-            min-height: 600px;
-            background: linear-gradient(135deg, #fafafa 0%, #ffffff 100%);
-        }}
-        
-        .info-panel {{
-            background: var(--white);
-            border-radius: 1rem;
-            padding: 1.5rem;
-            margin-top: 2rem;
-            box-shadow: var(--shadow-md);
-            border: 1px solid var(--gray-200);
-        }}
-        
-        .stats-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-            margin-bottom: 1.5rem;
-        }}
-        
-        .stat-card {{
-            background: linear-gradient(135deg, var(--gray-50) 0%, var(--white) 100%);
-            padding: 1rem;
-            border-radius: 0.75rem;
-            border: 1px solid var(--gray-200);
-            text-align: center;
-        }}
-        
-        .stat-number {{
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: var(--primary-color);
-            margin-bottom: 0.25rem;
-        }}
-        
-        .stat-label {{
-            font-size: 0.875rem;
-            color: var(--gray-600);
-            font-weight: 500;
-        }}
-        
-        .legend-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1.5rem;
-        }}
-        
-        .legend-section {{
-            background: var(--gray-50);
-            padding: 1rem;
-            border-radius: 0.75rem;
-            border: 1px solid var(--gray-200);
-        }}
-        
-        .legend-title {{
-            font-weight: 600;
-            color: var(--gray-700);
-            margin-bottom: 0.75rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }}
-        
-        .legend-items {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 0.5rem;
-        }}
-        
-        .legend-item {{
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.25rem;
-            border-radius: 0.25rem;
-            font-size: 0.875rem;
-        }}
-        
-        .legend-color {{
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            border: 1px solid var(--gray-300);
-            flex-shrink: 0;
-        }}
-        
-        .legend-line {{
-            width: 20px;
-            height: 3px;
-            border-radius: 1.5px;
-            flex-shrink: 0;
-        }}
-        
-        .modal-overlay {{
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.5);
-            backdrop-filter: blur(4px);
-            z-index: 1000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 1rem;
-        }}
-        
-        .modal {{
-            background: white;
-            border-radius: 1rem;
-            padding: 2rem;
-            max-width: 600px;
-            width: 100%;
-            max-height: 80vh;
-            overflow-y: auto;
-            box-shadow: var(--shadow-xl);
-        }}
-        
-        .modal-header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1.5rem;
-        }}
-        
-        .modal-title {{
-            font-size: 1.25rem;
-            font-weight: 700;
-            color: var(--gray-800);
-            margin: 0;
-        }}
-        
-        .bank-card {{
-            border: 2px solid var(--gray-200);
-            border-radius: 0.75rem;
-            padding: 1rem;
-            margin-bottom: 0.75rem;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            background: var(--white);
-        }}
-        
-        .bank-card:hover {{
-            border-color: var(--primary-color);
-            box-shadow: var(--shadow-md);
-        }}
-        
-        .bank-card.active {{
-            border-color: var(--primary-color);
-            background: linear-gradient(135deg, #e0f2fe 0%, #f8faff 100%);
-        }}
-        
-        .bank-name {{
-            font-weight: 600;
-            color: var(--gray-800);
-            margin-bottom: 0.25rem;
-        }}
-        
-        .bank-stats {{
-            font-size: 0.875rem;
-            color: var(--gray-600);
-        }}
-        
-        .alert {{
-            padding: 1rem;
-            border-radius: 0.5rem;
-            margin-bottom: 1rem;
-            border-left: 4px solid;
-        }}
-        
-        .alert-success {{
-            background: #f0fff4;
-            border-color: var(--success-color);
-            color: #22543d;
-        }}
-        
-        .alert-error {{
-            background: #fef2f2;
-            border-color: var(--danger-color);
-            color: #742a2a;
-        }}
-        
-        .alert-info {{
-            background: #eff6ff;
-            border-color: var(--primary-color);
-            color: #1e3a8a;
-        }}
-        
-        @media (max-width: 768px) {{
-            .container {{
-                padding: 1rem;
-            }}
-            
-            .controls-grid {{
-                grid-template-columns: 1fr;
-                gap: 1rem;
-            }}
-            
-            .header h1 {{
-                font-size: 2rem;
-            }}
-            
-            .control-row {{
-                flex-wrap: wrap;
-            }}
-            
-            #mynetworkid {{
-                height: 50vh;
-                min-height: 400px;
-            }}
-            
-            .stats-grid {{
-                grid-template-columns: repeat(2, 1fr);
-            }}
-            
-            .legend-items {{
-                grid-template-columns: 1fr;
-            }}
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1><i class="fas fa-brain"></i> Knowledge Graph Visualization</h1>
-            <h2>Memory Bank: <span style="color: rgba(255,255,255,0.9);">{bank}</span></h2>
-        </div>
-        
-        <div class="controls-container">
-            <div class="controls-grid">
-                <div class="control-group bank-selector">
-                    <label><i class="fas fa-database"></i> Memory Bank</label>
-                    <div class="control-row">
-                        <select id="bankSelect" class="form-select" onchange="switchToBank()">
-                            <option value="{bank}">{bank}</option>
-                        </select>
-                        <button onclick="loadAvailableBanks()" class="btn btn-primary" title="Refresh bank list">
-                            <i class="fas fa-sync-alt"></i>
-                        </button>
-                        <button onclick="compareBanks()" class="btn btn-secondary" title="Compare all banks">
-                            <i class="fas fa-chart-bar"></i>
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="control-group">
-                    <label><i class="fas fa-plus-circle"></i> Create Bank</label>
-                    <div class="control-row">
-                        <input type="text" id="newBankInput" class="form-input" placeholder="Enter bank name..." maxlength="50">
-                        <button onclick="createNewBank()" class="btn btn-success" title="Create new bank">
-                            <i class="fas fa-plus"></i> Create
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="control-group">
-                    <label><i class="fas fa-search"></i> Search Entities</label>
-                    <div class="control-row">
-                        <input type="text" id="searchInput" class="form-input" placeholder="Search entities..." onkeyup="searchNodes()">
-                        <button onclick="clearSearch()" class="btn btn-outline" title="Clear search">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="control-group">
-                    <label><i class="fas fa-project-diagram"></i> Layout</label>
-                    <select id="layoutSelect" class="form-select" onchange="changeLayout()">
-                        <option value="physics">Force-Directed</option>
-                        <option value="hierarchical">Hierarchical</option>
-                        <option value="random">Random</option>
-                    </select>
-                </div>
-                
-                <div class="control-group">
-                    <label><i class="fas fa-tools"></i> Actions</label>
-                    <div class="control-row">
-                        <button onclick="fitNetwork()" class="btn btn-outline" title="Fit to screen">
-                            <i class="fas fa-expand-arrows-alt"></i>
-                        </button>
-                        <button onclick="exportNetwork()" class="btn btn-outline" title="Export as PNG">
-                            <i class="fas fa-download"></i>
-                        </button>
-                        <button onclick="refreshData()" class="btn btn-outline" title="Refresh data">
-                            <i class="fas fa-redo"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="network-container">
-            <div id="mynetworkid"></div>
-        </div>
-        
-        <div class="info-panel">
-            <div id="networkStats" class="stats-grid"></div>
-            <div id="selectedInfo">
-                <div class="alert alert-info">
-                    <i class="fas fa-info-circle"></i> Click on a node to see details
-                </div>
-            </div>
-            
-            <div class="legend-grid">
-                <div class="legend-section">
-                    <div class="legend-title">
-                        <i class="fas fa-shapes"></i> Entity Types
-                    </div>
-                    <div class="legend-items">
-                        <div class="legend-item">
-                            <div class="legend-color" style="background: #667eea;"></div>
-                            <span>Named Entity</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="legend-color" style="background: #48bb78;"></div>
-                            <span>Technical Term</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="legend-color" style="background: #764ba2;"></div>
-                            <span>Concept</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="legend-color" style="background: #f56565;"></div>
-                            <span>Contact Info</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="legend-color" style="background: #ed8936;"></div>
-                            <span>Measurement</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="legend-color" style="background: #38b2ac;"></div>
-                            <span>Date</span>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="legend-section">
-                    <div class="legend-title">
-                        <i class="fas fa-link"></i> Relationship Types
-                    </div>
-                    <div class="legend-items">
-                        <div class="legend-item">
-                            <div class="legend-line" style="background: #f56565;"></div>
-                            <span>Created</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="legend-line" style="background: #764ba2;"></div>
-                            <span>Known As</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="legend-line" style="background: #667eea;"></div>
-                            <span>Leads To</span>
-                        </div>
-                        <div class="legend-item">
-                            <div class="legend-line" style="background: #6b7280;"></div>
-                            <span>Related</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script type="text/javascript">
-        let network;
-        let nodes, edges;
-        let allNodes, allEdges;
-        let currentBank = '{bank}';
-        let availableBanks = [];
-        
-        // Load available banks on page initialization
-        async function loadAvailableBanks() {{
-            try {{
-                const response = await fetch('/visualizations');
-                const data = await response.json();
-                availableBanks = data.available_visualizations;
-                
-                const bankSelect = document.getElementById('bankSelect');
-                bankSelect.innerHTML = '';
-                
-                availableBanks.forEach(bankInfo => {{
-                    const option = document.createElement('option');
-                    option.value = bankInfo.bank;
-                    
-                    // Create rich option text with bank statistics
-                    const stats = bankInfo.stats;
-                    const entityCount = stats.entities;
-                    const relationCount = stats.relationships;
-                    const obsCount = stats.observations;
-                    
-                    // Add emoji indicators for bank size
-                    let sizeIndicator = '📦'; // Small
-                    if (entityCount > 50 || relationCount > 50) {{
-                        sizeIndicator = '📋'; // Medium
-                    }}
-                    if (entityCount > 100 || relationCount > 100) {{
-                        sizeIndicator = '🗂️'; // Large
-                    }}
-                    if (entityCount > 200 || relationCount > 200) {{
-                        sizeIndicator = '🏢'; // Very Large
-                    }}
-                    
-                    option.textContent = `${{sizeIndicator}} ${{bankInfo.bank}} (${{entityCount}}E, ${{relationCount}}R, ${{obsCount}}O)`;
-                    
-                    if (bankInfo.bank === currentBank) {{
-                        option.selected = true;
-                    }}
-                    bankSelect.appendChild(option);
-                }});
-                
-                // Update page title with bank count
-                const totalBanks = availableBanks.length;
-                document.title = `Knowledge Graph Visualization - Bank: ${{currentBank}} (${{totalBanks}} banks available)`;
-                
-            }} catch (error) {{
-                console.error('Error loading available banks:', error);
-                document.getElementById('selectedInfo').innerHTML = `
-                    <div class="alert alert-error">
-                        <i class="fas fa-exclamation-triangle"></i> Error loading banks: ${{error.message}}
-                    </div>
-                `;
-            }}
-        }}
-        
-        // Switch to a different bank
-        async function switchToBank() {{
-            const bankSelect = document.getElementById('bankSelect');
-            const selectedBank = bankSelect.value;
-            
-            if (selectedBank === currentBank) {{
-                return; // No change needed
-            }}
-            
-            // Show enhanced loading state with bank info
-            const selectedBankInfo = availableBanks.find(b => b.bank === selectedBank);
-            const bankStats = selectedBankInfo ? selectedBankInfo.stats : {{ entities: '?', relationships: '?', observations: '?' }};
-            
-            document.getElementById('selectedInfo').innerHTML = `
-                <div class="alert alert-info">
-                    <i class="fas fa-spinner fa-spin"></i> Switching to bank: <strong>${{selectedBank}}</strong>
-                    <br><small>Loading ${{bankStats.entities}} entities and ${{bankStats.relationships}} relationships...</small>
-                </div>
-            `;
-            
-            // Update current bank
-            currentBank = selectedBank;
-            
-            // Update page title and header with enhanced info
-            const totalBanks = availableBanks.length;
-            document.title = `Knowledge Graph Visualization - Bank: ${{selectedBank}} (${{totalBanks}} banks available)`;
-            document.querySelector('.header h2').innerHTML = `Memory Bank: <span style="color: rgba(255,255,255,0.9);">${{selectedBank}}</span> <small style="opacity: 0.7;">(1 of ${{totalBanks}})</small>`;
-            
-            // Update browser URL without reload
-            const newUrl = `/banks/${{selectedBank}}/visualize`;
-            history.pushState({{bank: selectedBank}}, '', newUrl);
-            
-            // Preserve current interface state
-            const searchTerm = document.getElementById('searchInput').value;
-            const layoutType = document.getElementById('layoutSelect').value;
-            
-            // Load new bank data
-            await initNetwork(selectedBank);
-            
-            // Restore interface state
-            document.getElementById('searchInput').value = searchTerm;
-            document.getElementById('layoutSelect').value = layoutType;
-            
-            // Apply search if there was one
-            if (searchTerm) {{
-                searchNodes();
-            }}
-            
-            // Apply layout if not default
-            if (layoutType !== 'physics') {{
-                changeLayout();
-            }}
-        }}
-        
-        // Create a new memory bank
-        async function createNewBank() {{
-            const bankInput = document.getElementById('newBankInput');
-            const bankName = bankInput.value.trim();
-            
-            if (!bankName) {{
-                alert('Please enter a bank name');
-                return;
-            }}
-            
-            if (bankName === 'default') {{
-                alert('Cannot create a bank named "default" - please choose a different name');
-                return;
-            }}
-            
-            // Basic validation for bank name
-            if (!/^[a-zA-Z0-9_-]+$/.test(bankName)) {{
-                alert('Bank name can only contain letters, numbers, hyphens, and underscores');
-                return;
-            }}
-            
-            try {{
-                const response = await fetch('/banks/create', {{
-                    method: 'POST',
-                    headers: {{
-                        'Content-Type': 'application/json'
-                    }},
-                    body: JSON.stringify({{ bank: bankName }})
-                }});
-                
-                const result = await response.json();
-                
-                if (result.status === 'success') {{
-                    // Clear the input
-                    bankInput.value = '';
-                    
-                    // Refresh the bank list
-                    await loadAvailableBanks();
-                    
-                    // Switch to the new bank
-                    document.getElementById('bankSelect').value = bankName;
-                    await switchToBank();
-                    
-                    // Show success message
-                    document.getElementById('selectedInfo').innerHTML = `
-                        <div class="alert alert-success">
-                            <i class="fas fa-check-circle"></i> Bank "<strong>${{bankName}}</strong>" created successfully!
-                            <br><small>You can now add entities and relationships to this bank.</small>
-                        </div>
-                    `;
-                }} else {{
-                    alert(`Error creating bank: ${{result.message || 'Unknown error'}}`);
-                }}
-            }} catch (error) {{
-                console.error('Error creating bank:', error);
-                alert(`Error creating bank: ${{error.message}}`);
-            }}
-        }}
-        
-        // Initialize the network with optional bank parameter
-        async function initNetwork(bankName = currentBank) {{
-            try {{
-                const response = await fetch(`/banks/${{bankName}}/graph-data`);
-                const data = await response.json();
-                
-                if (data.error) {{
-                    document.getElementById('selectedInfo').innerHTML = `
-                        <div class="alert alert-error">
-                            <i class="fas fa-exclamation-circle"></i> Error: ${{data.error}}
-                        </div>
-                    `;
-                    return;
-                }}
-                
-                allNodes = new vis.DataSet(data.nodes);
-                allEdges = new vis.DataSet(data.edges);
-                nodes = allNodes;
-                edges = allEdges;
-                
-                const container = document.getElementById('mynetworkid');
-                const graphData = {{ nodes: nodes, edges: edges }};
-                
-                const options = {{
-                    physics: {{
-                        enabled: true,
-                        stabilization: {{ iterations: 200 }},
-                        barnesHut: {{ gravitationalConstant: -80000, springConstant: 0.001, springLength: 200 }}
-                    }},
-                    interaction: {{
-                        hover: true,
-                        selectConnectedEdges: false
-                    }},
-                    nodes: {{
-                        borderWidth: 2,
-                        shadow: true,
-                        font: {{ color: '#343434' }}
-                    }},
-                    edges: {{
-                        shadow: true,
-                        smooth: true,
-                        font: {{ color: '#343434', size: 10 }}
-                    }}
-                }};
-                
-                // Create or update network
-                if (network) {{
-                    network.destroy();
-                }}
-                network = new vis.Network(container, graphData, options);
-                
-                // Event listeners
-                network.on("selectNode", function (params) {{
-                    if (params.nodes.length > 0) {{
-                        const nodeId = params.nodes[0];
-                        showNodeInfo(nodeId);
-                    }}
-                }});
-                
-                network.on("deselectNode", function () {{
-                    document.getElementById('selectedInfo').innerHTML = `
-                        <div class="alert alert-info">
-                            <i class="fas fa-info-circle"></i> Click on a node to see details
-                        </div>
-                    `;
-                }});
-                
-                // Update stats
-                updateStats(data.stats);
-                
-            }} catch (error) {{
-                console.error('Error loading graph data:', error);
-                document.getElementById('selectedInfo').innerHTML = `
-                    <div class="alert alert-error">
-                        <i class="fas fa-exclamation-triangle"></i> Error loading graph: ${{error.message}}
-                    </div>
-                `;
-            }}
-        }}
-        
-        function showNodeInfo(nodeId) {{
-            const node = allNodes.get(nodeId);
-            if (node) {{
-                const metadata = node.metadata || {{}};
-                const info = `
-                    <div class="alert alert-info">
-                        <h4 style="margin: 0 0 1rem 0; color: var(--primary-color);">
-                            <i class="fas fa-dot-circle"></i> Selected Node: ${{node.label}}
-                        </h4>
-                        <div style="display: grid; gap: 0.5rem; font-size: 0.875rem;">
-                            <div><strong>ID:</strong> ${{nodeId}}</div>
-                            <div><strong>Type:</strong> ${{metadata.type || 'Unknown'}}</div>
-                            <div><strong>Confidence:</strong> ${{(metadata.confidence || 0).toFixed(2)}}</div>
-                            <div><strong>Source:</strong> ${{metadata.source || 'N/A'}}</div>
-                            <div><strong>Created:</strong> ${{metadata.created_at || 'N/A'}}</div>
-                            ${{metadata.extracted_from ? `<div><strong>Extracted From:</strong> ${{metadata.extracted_from}}</div>` : ''}}
-                        </div>
-                    </div>
-                `;
-                document.getElementById('selectedInfo').innerHTML = info;
-            }}
-        }}
-        
-        function updateStats(stats) {{
-            document.getElementById('networkStats').innerHTML = `
-                <div class="stat-card">
-                    <div class="stat-number">${{stats.total_nodes}}</div>
-                    <div class="stat-label">Entities</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">${{stats.total_edges}}</div>
-                    <div class="stat-label">Relationships</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">${{stats.entity_types}}</div>
-                    <div class="stat-label">Entity Types</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">${{stats.relationship_types}}</div>
-                    <div class="stat-label">Relationship Types</div>
-                </div>
-            `;
-        }}
-        
-        function clearSearch() {{
-            document.getElementById('searchInput').value = '';
-            searchNodes(); // This will reset all nodes to original style
-        }}
-        
-        function compareBanks() {{
-            // Create a modern comparison modal
-            const overlay = document.createElement('div');
-            overlay.className = 'modal-overlay';
-            
-            const modal = document.createElement('div');
-            modal.className = 'modal';
-            
-            let content = `
-                <div class="modal-header">
-                    <h3 class="modal-title">
-                        <i class="fas fa-database"></i> Memory Banks Comparison
-                    </h3>
-                    <button onclick="this.closest('.modal-overlay').remove()" class="btn btn-outline" style="padding: 0.5rem; width: 2.5rem; height: 2.5rem;">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-                <div style="margin-bottom: 1rem; color: var(--gray-600); font-size: 0.875rem;">
-                    Click on any bank to switch to it
-                </div>
-            `;
-            
-            availableBanks.forEach(bankInfo => {{
-                const isActive = bankInfo.bank === currentBank;
-                content += `
-                    <div class="bank-card ${{isActive ? 'active' : ''}}" onclick="selectBankFromComparison('${{bankInfo.bank}}')">
-                        <div class="bank-name">
-                            ${{isActive ? '<i class="fas fa-check-circle" style="color: var(--primary-color);"></i> ' : ''}}
-                            ${{bankInfo.bank}}
-                        </div>
-                        <div class="bank-stats">
-                            <i class="fas fa-shapes"></i> ${{bankInfo.stats.entities}} entities • 
-                            <i class="fas fa-link"></i> ${{bankInfo.stats.relationships}} relationships • 
-                            <i class="fas fa-sticky-note"></i> ${{bankInfo.stats.observations}} observations
-                        </div>
-                    </div>
-                `;
-            }});
-            
-            modal.innerHTML = content;
-            overlay.appendChild(modal);
-            
-            // Close on backdrop click
-            overlay.onclick = (e) => {{
-                if (e.target === overlay) {{
-                    overlay.remove();
-                }}
-            }};
-            
-            document.body.appendChild(overlay);
-        }}
-        
-        function selectBankFromComparison(bankName) {{
-            document.querySelector('.modal-overlay').remove();
-            document.getElementById('bankSelect').value = bankName;
-            switchToBank();
-        }}
-        
-        function searchNodes() {{
-            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-            if (searchTerm === '') {{
-                // Reset all nodes to original style
-                const updates = allNodes.map(node => ({{
-                    id: node.id,
-                    color: node.color
-                }}));
-                nodes.update(updates);
-                return;
-            }}
-            
-            // Highlight matching nodes
-            const updates = allNodes.map(node => {{
-                const matches = node.label.toLowerCase().includes(searchTerm) || 
-                              node.id.toLowerCase().includes(searchTerm);
-                return {{
-                    id: node.id,
-                    color: matches ? 
-                        {{ background: '#FFD700', border: '#FFA500' }} : 
-                        {{ background: '#E0E0E0', border: '#CCCCCC' }}
-                }};
-            }});
-            nodes.update(updates);
-        }}
-        
-        function changeLayout() {{
-            const layout = document.getElementById('layoutSelect').value;
-            let options = {{}};
-            
-            if (layout === 'physics') {{
-                options = {{
-                    physics: {{ enabled: true }},
-                    layout: {{ randomSeed: 2 }}
-                }};
-            }} else if (layout === 'hierarchical') {{
-                options = {{
-                    physics: {{ enabled: false }},
-                    layout: {{
-                        hierarchical: {{
-                            direction: 'UD',
-                            sortMethod: 'directed'
-                        }}
-                    }}
-                }};
-            }} else if (layout === 'random') {{
-                options = {{
-                    physics: {{ enabled: false }},
-                    layout: {{ randomSeed: Math.random() }}
-                }};
-            }}
-            
-            network.setOptions(options);
-        }}
-        
-        function fitNetwork() {{
-            network.fit();
-        }}
-        
-        function exportNetwork() {{
-            const canvas = document.querySelector('#mynetworkid canvas');
-            if (canvas) {{
-                const link = document.createElement('a');
-                link.download = `knowledge-graph-${{currentBank}}.png`;
-                link.href = canvas.toDataURL();
-                link.click();
-            }}
-        }}
-        
-        function refreshData() {{
-            initNetwork(currentBank);
-        }}
-        
-        // Initialize when page loads
-        document.addEventListener('DOMContentLoaded', async function() {{
-            await loadAvailableBanks();
-            await initNetwork();
-        }});
-        
-        // Handle browser back/forward buttons
-        window.addEventListener('popstate', function(event) {{
-            if (event.state && event.state.bank) {{
-                currentBank = event.state.bank;
-                document.getElementById('bankSelect').value = currentBank;
-                initNetwork(currentBank);
-            }}
-        }});
-    </script>
-</body>
-</html>
-    """
-    
-    return StreamingResponse(
-        iter([html_content]),
-        media_type="text/html"
-    )
-
-@app.get("/visualizations")
-def list_visualizations():
-    """
-    List available graph visualizations for all memory banks.
-    """
-    available_banks = list(memory_banks.keys())
-    visualizations = []
-    
-    for bank in available_banks:
-        bank_stats = {
-            "entities": len(memory_banks[bank]["nodes"]),
-            "relationships": len(memory_banks[bank]["edges"]),
-            "observations": len(memory_banks[bank]["observations"])
-        }
-        
-        visualizations.append({
-            "bank": bank,
-            "visualization_url": f"/banks/{bank}/visualize",
-            "data_url": f"/banks/{bank}/graph-data",
-            "stats": bank_stats
-        })
-    
-    return {
-        "available_visualizations": visualizations,
-        "total_banks": len(available_banks)
-    }
-
-@app.get("/visualize")
-def visualize_all_banks():
-    """
-    Main visualization interface with bank selection.
-    Redirects to the default bank visualization with bank switching enabled.
-    """
-    # Default to first available bank or 'default'
-    default_bank = 'default' if 'default' in memory_banks else list(memory_banks.keys())[0] if memory_banks else 'default'
-    
-    # Render the enhanced visualization page
-    return visualize_graph(default_bank)
-
-@app.get("/")
-async def root(request: Request):
-    """Root endpoint for compatibility - handles both JSON and SSE"""
-    logger.info("Handling root endpoint")
-    
-    # Check if client expects SSE
-    accept = request.headers.get("accept", "")
-    if "text/event-stream" in accept:
-        # Return SSE response for agent compatibility
-        async def generate_sse():
-            # Send initial data
-            data = {
-                "status": "success",
-                "server": "Graph Memory MCP Server",
-                "version": "1.0",
-                "capabilities": [
-                    "memory_management",
-                    "sequential_thinking", 
-                    "graph_operations",
-                    "multi_bank_support"
-                ]
-            }
-            yield f"data: {json.dumps(data)}\n\n"
-            
-            # Keep connection alive
-            while True:
-                yield f"data: {json.dumps({'heartbeat': True, 'timestamp': time.time()})}\n\n"
-                await asyncio.sleep(30)  # Send heartbeat every 30 seconds
-        
-        return StreamingResponse(
-            generate_sse(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "Access-Control-Allow-Origin": "*"
-            }
-        )
-    
-    # Regular JSON response
-    return {"message": "Graph Memory MCP Server is running."}
-
-# Root POST handler temporarily disabled to fix hanging issue
-# @app.post("/")
-# async def disabled_root_post(request: Request):
-#     """Temporarily disabled to fix hanging issue"""
-#     return {"message": "Root POST temporarily disabled"}
-    """
-    Handle JSON-RPC 2.0 requests for MCP protocol.
-    Accepts JSON-RPC initialize and other MCP method calls.
-    """
-    try:
-        logger.info("Root POST handler called")
-        
-        # Get the request body with timeout
-        try:
-            body = await asyncio.wait_for(request.body(), timeout=2.0)
-        except asyncio.TimeoutError:
-            logger.error("Request body read timeout")
-            return {"message": "Graph Memory MCP Server is running."}
-        
-        logger.info(f"Request body length: {len(body) if body else 0}")
-        
-        if not body:
-            return {"message": "Graph Memory MCP Server is running."}
-        
-        # Parse JSON-RPC request
-        try:
-            rpc_request = json.loads(body)
-            logger.info(f"Parsed JSON-RPC request: {rpc_request}")
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON decode error: {e}")
-            return {"message": "Graph Memory MCP Server is running."}
-        
-        # Quick return for non-MCP requests
-        if not isinstance(rpc_request, dict) or rpc_request.get("jsonrpc") != "2.0":
-            return {"message": "Graph Memory MCP Server is running."}
-        
-        method = rpc_request.get("method")
-        request_id = rpc_request.get("id")
-        params = rpc_request.get("params", {})
-        
-        logger.info(f"Handling JSON-RPC method: {method}")
-        
-        if method == "initialize":
-            # Return proper MCP initialize response
-            return {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": {
-                        "protocolVersion": "2025-06-18",
-                        "serverInfo": {
-                            "name": "Graph Memory MCP Server",
-                            "version": "1.0"
-                        },
-                        "capabilities": {
-                            "tools": {
-                                "listChanged": True
-                            },
-                            "resources": {
-                                "subscribe": False,
-                                "listChanged": True
-                            },
-                            "roots": {
-                                "listChanged": True
-                            },
-                            "prompts": {
-                                "listChanged": False
-                            },
-                            "completion": {
-                                "supports": ["text"]
-                            }
-                        }
-                    }
-                }
-        elif method == "tools/list":
-            # Return available tools
-            return {
-                    "jsonrpc": "2.0", 
-                    "id": request_id,
-                    "result": {
-                        "tools": [
-                            {
-                                "name": "create_entities",
-                                "description": "Create multiple new entities in the knowledge graph with intelligent auto-extraction of additional entities and relationships from observations. **CRITICAL: AI agents MUST create and use project-specific memory banks. Never use 'default' bank for project work. Create bank with descriptive name (e.g., 'project-acme-auth', 'feature-user-dashboard') before creating entities. All project knowledge must go in the project's dedicated bank.**",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "entities": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "object",
-                                                "properties": {
-                                                    "name": {"type": "string"},
-                                                    "entityType": {"type": "string"},
-                                                    "observations": {"type": "array", "items": {"type": "string"}}
-                                                }
-                                            }
-                                        },
-                                        "auto_extract": {
-                                            "type": "boolean", 
-                                            "description": "Whether to automatically extract additional entities and relationships from observation text (default: true)",
-                                            "default": True
-                                        }
-                                    }
-                                }
-                            },
-                            {
-                                "name": "add_observations",
-                                "description": "Add new observations to existing entities",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "observations": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "object",
-                                                "properties": {
-                                                    "entityName": {"type": "string"},
-                                                    "contents": {"type": "array", "items": {"type": "string"}}
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            {
-                                "name": "create_relations",
-                                "description": "Create relations between entities",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "relations": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "object",
-                                                "properties": {
-                                                    "from": {"type": "string"},
-                                                    "to": {"type": "string"},
-                                                    "relationType": {"type": "string"}
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            {
-                                "name": "sequential_thinking",
-                                "description": "Add reasoning steps to the knowledge graph",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "step": {
-                                            "type": "object",
-                                            "properties": {
-                                                "thought": {"type": "string"},
-                                                "step_number": {"type": "number"},
-                                                "reasoning": {"type": "string"}
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            {
-                                "name": "ingest_knowledge",
-                                "description": "Create a knowledge graph from large text with advanced entity and relationship extraction",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "text": {"type": "string", "description": "Large text content to analyze"},
-                                        "bank": {"type": "string", "description": "Memory bank name"},
-                                        "source": {"type": "string", "description": "Source identifier"},
-                                        "extract_entities": {"type": "boolean", "description": "Extract entities"},
-                                        "extract_relationships": {"type": "boolean", "description": "Extract relationships"},
-                                        "create_observations": {"type": "boolean", "description": "Create observations"}
-                                    },
-                                    "required": ["text"]
-                                }
-                            },
-                            {
-                                "name": "search_nodes",
-                                "description": "Search entities in the knowledge graph by name, type, or observations content",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "query": {"type": "string", "description": "Search query text"},
-                                        "bank": {"type": "string", "description": "Memory bank to search in"},
-                                        "entity_type": {"type": "string", "description": "Filter by entity type"},
-                                        "case_sensitive": {"type": "boolean", "description": "Case sensitive search"},
-                                        "use_regex": {"type": "boolean", "description": "Use regular expressions"},
-                                        "limit": {"type": "number", "description": "Maximum number of results"}
-                                    },
-                                    "required": ["query"]
-                                }
-                            },
-                            {
-                                "name": "search_relations",
-                                "description": "Search relationships in the knowledge graph by type, context, or entity names",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "query": {"type": "string", "description": "Search query text"},
-                                        "bank": {"type": "string", "description": "Memory bank to search in"},
-                                        "relationship_type": {"type": "string", "description": "Filter by relationship type"},
-                                        "case_sensitive": {"type": "boolean", "description": "Case sensitive search"},
-                                        "use_regex": {"type": "boolean", "description": "Use regular expressions"},
-                                        "limit": {"type": "number", "description": "Maximum number of results"}
-                                    },
-                                    "required": ["query"]
-                                }
-                            },
-                            {
-                                "name": "search_observations",
-                                "description": "Search observations in the knowledge graph by content or entity",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "query": {"type": "string", "description": "Search query text"},
-                                        "bank": {"type": "string", "description": "Memory bank to search in"},
-                                        "entity_id": {"type": "string", "description": "Filter by entity ID"},
-                                        "case_sensitive": {"type": "boolean", "description": "Case sensitive search"},
-                                        "use_regex": {"type": "boolean", "description": "Use regular expressions"},
-                                        "limit": {"type": "number", "description": "Maximum number of results"}
-                                    },
-                                    "required": ["query"]
-                                }
-                            },
-                            {
-                                "name": "search_all",
-                                "description": "Search across all entities, relationships, and observations in the knowledge graph",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "query": {"type": "string", "description": "Search query text"},
-                                        "bank": {"type": "string", "description": "Memory bank to search in"},
-                                        "case_sensitive": {"type": "boolean", "description": "Case sensitive search"},
-                                        "use_regex": {"type": "boolean", "description": "Use regular expressions"},
-                                        "limit": {"type": "number", "description": "Maximum number of results"}
-                                    },
-                                    "required": ["query"]
-                                }
-                            }
-                        ]
-                    }
-                }
-        else:
-            # Unknown method
-            return {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "error": {
-                        "code": -32601,
-                        "message": "Method not found"
-                    }
-                }
-        
-        # Fallback for non-JSON-RPC requests
-        return {"message": "Graph Memory MCP Server is running."}
-        
-    except Exception as e:
-        logger.error(f"Error handling root POST: {e}")
-        return {"message": "Graph Memory MCP Server is running."}
 
 # MCP agent initialization endpoint
 
