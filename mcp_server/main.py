@@ -897,6 +897,46 @@ def search_all_endpoint(
     except Exception as e:
         return {"error": str(e), "query": q}
 
+@app.get("/visualizations")
+def get_visualizations(bank: str = Query(None)):
+    """
+    Get visualization data for the knowledge graph in the specified bank.
+    Returns nodes and edges in a format suitable for visualization libraries.
+    """
+    b = bank or current_bank
+    nodes = []
+    edges = []
+    
+    # Convert entities to visualization nodes
+    for entity_id, entity in memory_banks[b]["nodes"].items():
+        nodes.append({
+            "id": entity_id,
+            "label": entity_id,
+            "type": entity.data.get("type", "unknown"),
+            "size": len(entity.data.get("observations", [])) + 1
+        })
+    
+    # Convert relationships to visualization edges
+    for edge in memory_banks[b]["edges"]:
+        edges.append({
+            "source": edge.source,
+            "target": edge.target,
+            "type": edge.data.get("type", "related_to"),
+            "label": edge.data.get("type", "related_to")
+        })
+    
+    return {
+        "bank": b,
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {
+            "total_nodes": len(nodes),
+            "total_edges": len(edges),
+            "node_types": list(set([n["type"] for n in nodes])),
+            "edge_types": list(set([e["type"] for e in edges]))
+        }
+    }
+
 # New endpoint: ingest long text and update/extend graph in a specific bank
 
 @app.post("/context/ingest")
@@ -987,58 +1027,6 @@ def extract_advanced_entities(text: str):
     quoted_concepts = re.findall(r'"([^"]*)"', text)
     for concept in quoted_concepts:
         if is_valid_entity(concept):
-            entities[concept] = {"type": "concept", "confidence": 0.9}
-    
-    # 4. Email addresses and URLs
-    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
-    for email in emails:
-        entities[email] = {"type": "email", "confidence": 1.0}
-    
-    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
-    for url in urls:
-        entities[url] = {"type": "url", "confidence": 1.0}
-    
-    # 5. Numbers and measurements
-    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
-    for measurement in measurements:
-        entities[measurement] = {"type": "measurement", "confidence": 0.8}
-    
-    # 6. Dates
-    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
-    def is_valid_entity(entity_text):
-        entity_lower = entity_text.lower().strip()
-        return (len(entity_lower) > 2 and entity_lower not in stop_words and not entity_lower.isdigit() and len(entity_text.strip()) > 1)
-
-    for sentence in sentences:
-        sentence = sentence.strip()
-        if len(sentence) < 10:
-            continue
-        sentence_entities = []
-        for entity in entities.keys():
-            if entity.lower() in sentence.lower() and is_valid_entity(entity):
-                sentence_entities.append(entity)
-        for i, entity1 in enumerate(sentence_entities):
-            for entity2 in sentence_entities[i+1:]:
-                pattern = rf'\b{re.escape(entity1.lower())}.*?\b(\w+(?:s|ed|ing)?)\b.*?{re.escape(entity2.lower())}'
-                matches = re.findall(pattern, sentence.lower())
-                if matches:
-                    for action in matches:
-                        if len(action) > 2 and is_valid_entity(action):
-                            relationships.append({
-                                "from": entity1,
-                                "to": entity2,
-                                "type": action,
-                                "context": sentence[:100] + "..." if len(sentence) > 100 else sentence,
-                                "confidence": 0.6
-                            })
-                else:
-                    relationships.append({
-                        "from": entity1,
-                        "to": entity2,
-                        "type": "related_to",
-                        "context": sentence[:100] + "..." if len(sentence) > 100 else sentence,
-                        "confidence": 0.4
-                    })
             entities[concept] = {"type": "concept", "confidence": 0.9}
     
     # 4. Email addresses and URLs
