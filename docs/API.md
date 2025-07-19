@@ -147,10 +147,10 @@ POST /knowledge/ingest
 ### Search Entities
 
 ```http
-GET /search/entities?q={query}&bank={bank}&entity_type={type}&case_sensitive={bool}&use_regex={bool}&limit={number}
+GET /search/entities?q={query}&bank={bank}&entity_type={type}&case_sensitive={bool}&use_regex={bool}&fuzzy_match={bool}&fuzzy_threshold={float}&limit={number}
 ```
 
-**Description:** Search entities by name, type, or observations content with advanced relevance scoring.
+**Description:** Search entities by name, type, or observations content with advanced relevance scoring and fuzzy matching for typo tolerance.
 
 **Query Parameters:**
 - `q` (required): Search query text
@@ -158,6 +158,8 @@ GET /search/entities?q={query}&bank={bank}&entity_type={type}&case_sensitive={bo
 - `entity_type` (optional): Filter by entity type (named_entity, technical_term, concept, etc.)
 - `case_sensitive` (optional): Case sensitive search (default: false)
 - `use_regex` (optional): Use regular expressions (default: false)
+- `fuzzy_match` (optional): **NEW!** Enable fuzzy matching for typos (default: false)
+- `fuzzy_threshold` (optional): **NEW!** Similarity threshold 0.0-1.0 (default: 0.8)
 - `limit` (optional): Maximum number of results (default: 50)
 
 **Response:**
@@ -179,7 +181,9 @@ GET /search/entities?q={query}&bank={bank}&entity_type={type}&case_sensitive={bo
   "search_parameters": {
     "entity_type": null,
     "case_sensitive": false,
-    "use_regex": false
+    "use_regex": false,
+    "fuzzy_match": false,
+    "fuzzy_threshold": 0.8
   }
 }
 ```
@@ -303,6 +307,64 @@ GET /search/all?q={query}&bank={bank}&case_sensitive={bool}&use_regex={bool}&lim
   ]
 }
 ```
+
+## 🔍 **NEW: Fuzzy Matching & Typo Handling**
+
+All search endpoints support advanced fuzzy matching for intelligent typo tolerance and entity deduplication.
+
+### Fuzzy Search Parameters
+
+- **`fuzzy_match=true`**: Enables fuzzy string matching using Levenshtein distance algorithm
+- **`fuzzy_threshold=0.8`**: Similarity threshold (0.0-1.0) controlling match strictness
+  - **0.9**: Very strict (only minor typos)
+  - **0.8**: Standard (1-2 character differences) - **Recommended**
+  - **0.7**: Permissive (more variation allowed)
+  - **0.6**: Very permissive (may include false positives)
+
+### Fuzzy Search Examples
+
+```bash
+# Find entities despite typos
+curl "http://localhost:10642/search/entities?q=Goldmann&fuzzy_match=true&fuzzy_threshold=0.8"
+# Finds: "Goldman Sachs", "Goldman", etc.
+
+# Permissive search for variations
+curl "http://localhost:10642/search/entities?q=goldman&fuzzy_match=true&fuzzy_threshold=0.7"
+# Finds: "Goldman", "Goldmann", "gold man", etc.
+
+# Strict search for close matches only
+curl "http://localhost:10642/search/entities?q=Marcus&fuzzy_match=true&fuzzy_threshold=0.9"
+# Finds: "Marcus", "Markus", but not "Marc"
+```
+
+### Entity Deduplication During Ingestion
+
+When ingesting knowledge graphs, the system automatically:
+
+1. **Checks for similar entities** before creating new ones (similarity ≥ 0.85)
+2. **Merges typo variations** with existing correct entities
+3. **Updates confidence scores** when better extractions are found
+4. **Prevents fragmented knowledge graphs** from typo-induced duplicates
+
+**Example:**
+```bash
+# Ingesting text with typos
+curl -X POST http://localhost:10642/knowledge/ingest \
+  -d '{"text": "Goldman Sach expanded. Markus Goldman founded it."}'
+
+# Result: entities_created: 0 (merged with existing entities)
+# "Goldman Sach" → merged with "Goldman Sachs"
+# "Markus Goldman" → merged with "Marcus Goldman"
+```
+
+### Relevance Scoring with Fuzzy Matching
+
+- **Exact matches**: 1.0 relevance score
+- **Word matches**: 0.8 relevance score  
+- **Partial matches**: 0.3-0.7 relevance score
+- **Fuzzy matches**: 0.3-0.6 relevance score (scaled down from similarity)
+
+Fuzzy matches are ranked lower than exact matches to prioritize precision while still providing typo tolerance.
 
 ## Memory Banks
 

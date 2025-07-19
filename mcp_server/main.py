@@ -404,7 +404,48 @@ def get_reasoning_steps(bank: str = Query(None)):
 import re
 from typing import List, Dict, Any, Optional, Union
 
-def search_text(query: str, text: str, case_sensitive: bool = False, use_regex: bool = False) -> bool:
+def levenshtein_distance(s1: str, s2: str) -> int:
+    """Calculate Levenshtein distance between two strings"""
+    if len(s1) < len(s2):
+        return levenshtein_distance(s2, s1)
+    
+    if len(s2) == 0:
+        return len(s1)
+    
+    previous_row = list(range(len(s2) + 1))
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            # Cost of insertions, deletions, or substitutions
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (0 if c1 == c2 else 1)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    
+    return previous_row[-1]
+
+def fuzzy_similarity(s1: str, s2: str) -> float:
+    """Calculate fuzzy similarity score between 0.0 and 1.0"""
+    if not s1 or not s2:
+        return 0.0
+    
+    # Normalize strings for comparison
+    s1_norm = s1.lower().strip()
+    s2_norm = s2.lower().strip()
+    
+    if s1_norm == s2_norm:
+        return 1.0
+    
+    max_len = max(len(s1_norm), len(s2_norm))
+    if max_len == 0:
+        return 1.0
+    
+    distance = levenshtein_distance(s1_norm, s2_norm)
+    return 1.0 - (distance / max_len)
+
+def search_text(query: str, text: str, case_sensitive: bool = False, use_regex: bool = False, 
+                fuzzy_match: bool = False, fuzzy_threshold: float = 0.8) -> bool:
     """Helper function to search text with various matching options."""
     if not query or not text:
         return False
@@ -417,13 +458,34 @@ def search_text(query: str, text: str, case_sensitive: bool = False, use_regex: 
             # If regex is invalid, fall back to simple search
             pass
     
+    # Try exact/partial matching first (existing behavior)
     if case_sensitive:
-        return query in text
+        exact_match = query in text
     else:
-        return query.lower() in text.lower()
+        exact_match = query.lower() in text.lower()
+    
+    if exact_match:
+        return True
+    
+    # If fuzzy matching enabled and no exact match, try fuzzy
+    if fuzzy_match:
+        # Check fuzzy similarity for whole text and individual words
+        similarity = fuzzy_similarity(query, text)
+        if similarity >= fuzzy_threshold:
+            return True
+        
+        # Also check individual words in text for fuzzy matches
+        words = text.split()
+        for word in words:
+            word_similarity = fuzzy_similarity(query, word)
+            if word_similarity >= fuzzy_threshold:
+                return True
+    
+    return False
 
-def calculate_relevance_score(query: str, text: str, exact_match_bonus: float = 0.5) -> float:
-    """Calculate relevance score for search results."""
+def calculate_relevance_score(query: str, text: str, exact_match_bonus: float = 0.5, 
+                             fuzzy_match: bool = False, fuzzy_threshold: float = 0.8) -> float:
+    """Calculate relevance score for search results with fuzzy matching support."""
     if not query or not text:
         return 0.0
     
@@ -443,10 +505,29 @@ def calculate_relevance_score(query: str, text: str, exact_match_bonus: float = 
         coverage = len(query_lower) / len(text_lower)
         return min(0.7, 0.3 + coverage)
     
+    # Fuzzy matching score
+    if fuzzy_match:
+        similarity = fuzzy_similarity(query, text)
+        if similarity >= fuzzy_threshold:
+            # Scale fuzzy scores to be lower than exact matches
+            return similarity * 0.6
+        
+        # Check individual words for fuzzy matches
+        words = text.split()
+        max_word_similarity = 0.0
+        for word in words:
+            word_similarity = fuzzy_similarity(query, word)
+            if word_similarity >= fuzzy_threshold:
+                max_word_similarity = max(max_word_similarity, word_similarity)
+        
+        if max_word_similarity > 0:
+            return max_word_similarity * 0.5
+    
     return 0.0
 
 def search_entities(query: str, bank: str = None, entity_type: str = None, 
-                   case_sensitive: bool = False, use_regex: bool = False) -> List[Dict[str, Any]]:
+                   case_sensitive: bool = False, use_regex: bool = False,
+                   fuzzy_match: bool = False, fuzzy_threshold: float = 0.8, limit: int = 50) -> List[Dict[str, Any]]:
     """Search entities by name, type, or observations content."""
     b = bank or current_bank
     results = []
@@ -460,21 +541,21 @@ def search_entities(query: str, bank: str = None, entity_type: str = None,
         matched_fields = []
         
         # Search in entity ID/name
-        if search_text(query, entity_id, case_sensitive, use_regex):
-            relevance_score = max(relevance_score, calculate_relevance_score(query, entity_id))
+        if search_text(query, entity_id, case_sensitive, use_regex, fuzzy_match, fuzzy_threshold):
+            relevance_score = max(relevance_score, calculate_relevance_score(query, entity_id, 0.5, fuzzy_match, fuzzy_threshold))
             matched_fields.append("name")
         
         # Search in entity type
         ent_type = entity.data.get("type", "")
-        if search_text(query, ent_type, case_sensitive, use_regex):
-            relevance_score = max(relevance_score, calculate_relevance_score(query, ent_type) * 0.8)
+        if search_text(query, ent_type, case_sensitive, use_regex, fuzzy_match, fuzzy_threshold):
+            relevance_score = max(relevance_score, calculate_relevance_score(query, ent_type, 0.5, fuzzy_match, fuzzy_threshold) * 0.8)
             matched_fields.append("type")
         
         # Search in observations
         observations = entity.data.get("observations", [])
         for obs in observations:
-            if search_text(query, obs, case_sensitive, use_regex):
-                obs_score = calculate_relevance_score(query, obs) * 0.6
+            if search_text(query, obs, case_sensitive, use_regex, fuzzy_match, fuzzy_threshold):
+                obs_score = calculate_relevance_score(query, obs, 0.5, fuzzy_match, fuzzy_threshold) * 0.6
                 relevance_score = max(relevance_score, obs_score)
                 if "observations" not in matched_fields:
                     matched_fields.append("observations")
@@ -596,14 +677,17 @@ def search_entities_endpoint(
     entity_type: str = Query(None, description="Filter by entity type"),
     case_sensitive: bool = Query(False, description="Case sensitive search"),
     use_regex: bool = Query(False, description="Use regular expressions"),
+    fuzzy_match: bool = Query(False, description="Enable fuzzy matching for typos"),
+    fuzzy_threshold: float = Query(0.8, description="Fuzzy matching threshold (0.0-1.0)"),
     limit: int = Query(50, description="Maximum number of results")
 ):
     """
     Search entities by name, type, or observations content.
     Returns entities ranked by relevance score.
+    Supports fuzzy matching for handling typos and variations.
     """
     try:
-        results = search_entities(q, bank, entity_type, case_sensitive, use_regex)
+        results = search_entities(q, bank, entity_type, case_sensitive, use_regex, fuzzy_match, fuzzy_threshold, limit)
         return {
             "query": q,
             "bank": bank or current_bank,
@@ -612,7 +696,9 @@ def search_entities_endpoint(
             "search_parameters": {
                 "entity_type": entity_type,
                 "case_sensitive": case_sensitive,
-                "use_regex": use_regex
+                "use_regex": use_regex,
+                "fuzzy_match": fuzzy_match,
+                "fuzzy_threshold": fuzzy_threshold
             }
         }
     except Exception as e:
@@ -756,6 +842,26 @@ class KnowledgeIngest(BaseModel):
     extract_relationships: bool = True
     create_observations: bool = True
 
+def find_similar_entity(entity_name: str, bank: str, similarity_threshold: float = 0.85) -> Optional[str]:
+    """Find existing entity that is similar to the given entity name"""
+    b = bank or current_bank
+    entity_id = entity_name.replace(" ", "_").lower()
+    
+    # First check for exact match
+    if entity_id in memory_banks[b]["nodes"]:
+        return entity_id
+    
+    # Check for fuzzy matches
+    for existing_id, existing_node in memory_banks[b]["nodes"].items():
+        existing_name = existing_node.data.get("name", existing_id)
+        
+        # Check similarity between names
+        similarity = fuzzy_similarity(entity_name, existing_name)
+        if similarity >= similarity_threshold:
+            return existing_id
+    
+    return None
+
 def extract_advanced_entities(text: str):
     """Enhanced entity extraction with multiple patterns and types"""
     entities = {}
@@ -888,10 +994,19 @@ def ingest_knowledge_graph(payload: KnowledgeIngest = Body(...)):
         entities = extract_advanced_entities(text)
         
         for entity_name, entity_info in entities.items():
-            entity_id = entity_name.replace(" ", "_").lower()
+            # Check for similar existing entities to prevent duplicates
+            similar_entity_id = find_similar_entity(entity_name, b, similarity_threshold=0.85)
             
-            # Create or update entity
-            if entity_id not in memory_banks[b]["nodes"]:
+            if similar_entity_id:
+                # Use existing similar entity instead of creating duplicate
+                entity_id = similar_entity_id
+                # Optionally update confidence if this extraction has higher confidence
+                existing_node = memory_banks[b]["nodes"][entity_id]
+                if entity_info["confidence"] > existing_node.data.get("confidence", 0):
+                    existing_node.data["confidence"] = entity_info["confidence"]
+            else:
+                # Create new entity if no similar entity found
+                entity_id = entity_name.replace(" ", "_").lower()
                 node = Node(
                     id=entity_id,
                     data={

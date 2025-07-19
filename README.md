@@ -10,6 +10,7 @@ A Model Context Protocol (MCP) compliant server that provides persistent graph-b
 - **Graph Operations**: Complete CRUD operations for entities, relationships, and observations
 - **Sequential Thinking**: Support for reasoning step storage and retrieval
 - **Advanced Knowledge Graph Creation**: Sophisticated entity extraction from large text with confidence scoring
+- **Fuzzy Matching & Typo Handling**: **NEW!** Intelligent search and entity deduplication with typo tolerance
 - **Interactive Visualization**: Beautiful web-based graph visualization using vis.js Network library
 - **Smart Entity Detection**: Multiple entity types (named_entity, technical_term, concept, email, url, measurement, date)
 - **Intelligent Relationship Analysis**: Context-aware relationship detection with confidence scoring
@@ -92,6 +93,8 @@ Transform large text into sophisticated knowledge graphs with intelligent entity
 - **🤖 Intelligent Relationship Detection**: Context-aware analysis with action, categorical, and temporal relationships
 - **📊 Confidence Scoring**: Each entity and relationship gets confidence scores (0.4-0.9)
 - **📚 Source Attribution**: Every extracted element tagged with source document for traceability
+- **🔍 Entity Deduplication**: **NEW!** Prevents duplicate entities from typos and variations using fuzzy matching
+- **🛡️ Smart Normalization**: Automatically merges similar entities (e.g., "Goldman Sach" → "Goldman Sachs")
 - **⚙️ Large Text Processing**: Efficiently handles complex documents and creates comprehensive knowledge graphs
 
 ### Example Usage:
@@ -227,6 +230,8 @@ The server now includes **powerful search functionality** to find information ac
 - **🎯 Relevance Scoring**: Results ranked by relevance (1.0 = perfect match, 0.3-0.7 = partial matches)
 - **📝 Multiple Match Types**: Exact matches, word matches, partial text matches
 - **🔤 Text Options**: Case-sensitive/insensitive search, regular expression support
+- **🔍 Fuzzy Matching**: **NEW!** Intelligent typo tolerance with configurable similarity thresholds
+- **🛡️ Typo Handling**: Finds entities despite 1-2 character differences, missing letters, or case variations
 - **🏷️ Advanced Filtering**: Filter by entity type, relationship type, or specific memory banks
 - **⚡ Cross-Bank Search**: Search across all memory banks or target specific ones
 - **📊 Rich Results**: Includes matched fields, relevance scores, and comprehensive metadata
@@ -238,9 +243,13 @@ The server now includes **powerful search functionality** to find information ac
 - **Universal Search**: `GET /search/all?q=searchterm`
 
 ### Example Search Usage:
+
 ```bash
 # Search for entities related to Goldman Sachs
 curl "http://localhost:10642/search/entities?q=Goldman&limit=10"
+
+# Search with fuzzy matching for typos (NEW!)
+curl "http://localhost:10642/search/entities?q=Goldmann&fuzzy_match=true&fuzzy_threshold=0.8"
 
 # Search for acquisition relationships
 curl "http://localhost:10642/search/relationships?q=acquired"
@@ -250,9 +259,15 @@ curl "http://localhost:10642/search/all?q=Marcus&case_sensitive=false"
 
 # Advanced regex search for dates
 curl "http://localhost:10642/search/observations?q=\\d{4}&use_regex=true"
+
+# Fuzzy search with custom threshold for more permissive matching
+curl "http://localhost:10642/search/entities?q=goldman&fuzzy_match=true&fuzzy_threshold=0.7"
 ```
 
-**Example Result**: Searching for "Marcus" found 13 results across entities (2), relationships (4), and observations (7), including Marcus Goldman (founder), Marcus platform (banking product), and all related contexts with confidence scores!
+**Example Results**: 
+- **Standard Search**: "Marcus" found 13 results across entities (2), relationships (4), and observations (7)
+- **Fuzzy Search**: "Goldmann" with fuzzy matching finds both correct "Goldman" entities and typo variants
+- **Entity Deduplication**: Ingesting "Goldman Sach" automatically merges with existing "Goldman Sachs"
 
 ### Enhanced Knowledge Graph Creation
 
