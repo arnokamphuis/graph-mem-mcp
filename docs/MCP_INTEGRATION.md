@@ -429,7 +429,7 @@ The server will manage persistence and memory across VS Code sessions.
 
 ### Connection Issues
 
-- Verify server is running: `curl http://localhost:8000/`
+- Verify server is running: `curl http://localhost:10642/`
 - Check MCP configuration in VS Code
 - Review server logs: `podman logs graph-mcp-server`
 

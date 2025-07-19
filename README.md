@@ -1,6 +1,6 @@
 # Graph Memory MCP Server
 
-A Model Context Protocol (MCP) compliant server that provides persistent graph-based memory management for AI agents. This server allows AI agents to store, retrieve, and manipulate entities, relationships, observations, and reasoning steps in a graph structure with multi-bank support.
+A Model Context Protocol (MCP) compliant server that provides persistent graph-based memory management with **advanced knowledge graph creation and interactive visualization** for AI agents. This server allows AI agents to store, retrieve, and manipulate entities, relationships, observations, and reasoning steps in a graph structure with multi-bank support.
 
 ## 🎯 Features
 
@@ -9,7 +9,10 @@ A Model Context Protocol (MCP) compliant server that provides persistent graph-b
 - **Multi-Bank Architecture**: Support for multiple isolated memory banks
 - **Graph Operations**: Complete CRUD operations for entities, relationships, and observations
 - **Sequential Thinking**: Support for reasoning step storage and retrieval
-- **Context Ingestion**: Automatic entity extraction from text
+- **Advanced Knowledge Graph Creation**: Sophisticated entity extraction from large text with confidence scoring
+- **Interactive Visualization**: Beautiful web-based graph visualization using vis.js Network library
+- **Smart Entity Detection**: Multiple entity types (named_entity, technical_term, concept, email, url, measurement, date)
+- **Intelligent Relationship Analysis**: Context-aware relationship detection with confidence scoring
 - **Container Deployment**: Docker/Podman containerization with volume mounting
 - **RESTful API**: Full REST endpoints alongside MCP protocol
 
@@ -26,7 +29,7 @@ cd graph_mem
 podman build -t graph-mcp-server ./mcp_server
 
 # Run with persistent storage
-podman run -d --name graph-mcp-server -p 8000:8000 -v graph-mcp-memory:/data graph-mcp-server
+podman run -d --name graph-mcp-server -p 10642:10642 -v graph-mcp-memory:/data graph-mcp-server
 ```
 
 ### 2. Configure VS Code Agent Chat
@@ -35,13 +38,9 @@ Create or update your VS Code `mcp.json` configuration:
 
 ```json
 {
-  "mcp-server-graph-memory": {
-    "command": "curl",
-    "args": [
-      "-N",
-      "-H", "Accept: text/event-stream",
-      "http://localhost:8000/"
-    ]
+  "my-mcp-server": {
+    "url": "http://localhost:10642",
+    "type": "http"
   }
 }
 ```
@@ -50,15 +49,63 @@ Create or update your VS Code `mcp.json` configuration:
 
 ```bash
 # Check server status
-curl http://localhost:8000/
+curl http://localhost:10642/
 
-# Create an entity
-curl -X POST http://localhost:8000/entities \
+# Create an entity via MCP
+curl -X POST http://localhost:10642/entities \
   -H "Content-Type: application/json" \
   -d '{"id": "test-entity", "data": {"type": "example"}}'
 
-# List all entities
-curl http://localhost:8000/entities
+# Advanced: Ingest large text for knowledge graph creation
+curl -X POST http://localhost:10642/knowledge/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Your large text here...", "source": "document_name", "bank_name": "default"}'
+
+# View interactive visualization
+open http://localhost:10642/banks/default/visualize
+```
+
+## 🎨 **NEW: Interactive Knowledge Graph Visualization**
+
+The server now includes **beautiful web-based interactive visualization** powered by vis.js Network library:
+
+### Key Visualization Features:
+- **🌈 Color-Coded Entities**: Blue (named entities), Green (technical terms), Purple (concepts)
+- **📏 Smart Sizing**: Node size reflects confidence scores
+- **🔗 Relationship Styling**: Edge thickness and colors based on relationship type and confidence
+- **🔍 Interactive Controls**: Zoom, pan, search, filter entities and relationships
+- **📐 Multiple Layouts**: Choose from hierarchical, force-directed, or custom arrangements
+- **💾 Export Capability**: Save visualizations as PNG images
+- **⚡ Real-time Updates**: Dynamic visualization updates as knowledge graphs evolve
+
+### Access Your Visualizations:
+- **Interactive Interface**: `http://localhost:10642/banks/default/visualize`
+- **Graph Data API**: `http://localhost:10642/banks/default/graph-data`
+- **Available Visualizations**: `http://localhost:10642/visualizations`
+
+## 🧠 **NEW: Advanced Knowledge Graph Creation**
+
+Transform large text into sophisticated knowledge graphs with intelligent entity extraction:
+
+### Enhanced Capabilities:
+- **🏷️ Multiple Entity Types**: Named entities, technical terms, concepts, emails, URLs, measurements, dates
+- **🤖 Intelligent Relationship Detection**: Context-aware analysis with action, categorical, and temporal relationships
+- **📊 Confidence Scoring**: Each entity and relationship gets confidence scores (0.4-0.9)
+- **📚 Source Attribution**: Every extracted element tagged with source document for traceability
+- **⚙️ Large Text Processing**: Efficiently handles complex documents and creates comprehensive knowledge graphs
+
+### Example Usage:
+```bash
+# Ingest financial document
+curl -X POST http://localhost:10642/knowledge/ingest \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Goldman Sachs is a leading global investment bank founded in 1869 by Marcus Goldman...",
+    "source": "financial_overview",
+    "bank_name": "default"
+  }'
+
+# Result: Automatically extracted 26+ entities, 24+ relationships with confidence scoring
 ```
 
 ## 📚 Documentation

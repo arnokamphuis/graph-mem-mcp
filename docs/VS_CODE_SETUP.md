@@ -19,7 +19,7 @@ Ensure your server is running:
 podman start graph-mcp-server
 
 # Verify it's running
-curl http://localhost:8000/
+curl http://localhost:10642/
 ```
 
 ### 2. Create MCP Configuration
@@ -47,28 +47,25 @@ Add the Graph Memory MCP Server to your `mcp.json`:
 
 ```json
 {
+  "my-mcp-server": {
+    "url": "http://localhost:10642",
+    "type": "http"
+  }
+}
+```
+
+### 4. Legacy Configuration (Alternative)
+
+If you need to use the legacy stdio-based connection:
+
+```json
+{
   "mcp-server-graph-memory": {
     "command": "curl",
     "args": [
       "-N",
       "-H", "Accept: text/event-stream",
-      "http://localhost:8000/"
-    ]
-  }
-}
-```
-
-### 4. Alternative Configuration with Node.js
-
-If you prefer a Node.js-based connection:
-
-```json
-{
-  "mcp-server-graph-memory": {
-    "command": "node",
-    "args": [
-      "-e",
-      "const http = require('http'); const options = { hostname: 'localhost', port: 8000, path: '/', method: 'GET', headers: { 'Accept': 'text/event-stream' } }; const req = http.request(options, (res) => { res.on('data', (chunk) => { process.stdout.write(chunk); }); }); req.end();"
+      "http://localhost:10642/"
     ]
   }
 }

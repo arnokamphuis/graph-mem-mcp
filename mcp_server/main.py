@@ -656,6 +656,496 @@ def retrieve_context(bank: str = Query(None)):
         "reasoning_steps": [s.dict() for s in memory_banks[b]["reasoning_steps"]]
     }
 
+# Graph visualization endpoints
+
+@app.get("/banks/{bank}/graph-data")
+def get_graph_data(bank: str):
+    """
+    Get graph data in vis.js network format for visualization.
+    Returns nodes and edges formatted for interactive graph visualization.
+    """
+    if bank not in memory_banks:
+        return {"error": "Bank not found"}
+    
+    nodes = []
+    edges = []
+    
+    # Convert entities to vis.js nodes
+    for node_id, node in memory_banks[bank]["nodes"].items():
+        # Determine node styling based on entity type
+        entity_type = node.data.get("type", "node")
+        confidence = node.data.get("confidence", 0.5)
+        
+        # Color coding for different entity types
+        color_map = {
+            "named_entity": "#4A90E2",  # Blue
+            "technical_term": "#7ED321", # Green  
+            "concept": "#9013FE",       # Purple
+            "email": "#FF6B35",         # Orange
+            "url": "#FF6B35",           # Orange
+            "measurement": "#F5A623",   # Yellow
+            "date": "#50E3C2",          # Teal
+            "node": "#B8E986"           # Light green (default)
+        }
+        
+        # Shape coding
+        shape_map = {
+            "named_entity": "dot",
+            "technical_term": "square", 
+            "concept": "diamond",
+            "email": "triangle",
+            "url": "triangle",
+            "measurement": "box",
+            "date": "ellipse",
+            "node": "dot"
+        }
+        
+        node_data = {
+            "id": node_id,
+            "label": node.data.get("name", node_id),
+            "title": f"Type: {entity_type}<br/>Confidence: {confidence:.2f}<br/>Source: {node.data.get('source', 'N/A')}",
+            "color": {
+                "background": color_map.get(entity_type, "#B8E986"),
+                "border": "#2B7CE9",
+                "highlight": {"background": "#FFD700", "border": "#FFA500"}
+            },
+            "shape": shape_map.get(entity_type, "dot"),
+            "size": 10 + (confidence * 20),  # Size based on confidence
+            "font": {"size": 12 + (confidence * 8)},
+            "metadata": node.data
+        }
+        nodes.append(node_data)
+    
+    # Convert relationships to vis.js edges  
+    for edge in memory_banks[bank]["edges"]:
+        relationship_type = edge.data.get("type", "relation")
+        confidence = edge.data.get("confidence", 0.5)
+        
+        # Color coding for relationship types
+        edge_color_map = {
+            "created": "#E74C3C",       # Red
+            "developed": "#E67E22",     # Orange
+            "leads": "#3498DB",         # Blue
+            "known": "#9B59B6",        # Purple
+            "like": "#1ABC9C",         # Teal
+            "work": "#F39C12",         # Yellow
+            "related_to": "#95A5A6",   # Gray
+            "relation": "#BDC3C7"      # Light gray (default)
+        }
+        
+        edge_data = {
+            "id": edge.id,
+            "from": edge.source,
+            "to": edge.target,
+            "label": relationship_type,
+            "title": f"Type: {relationship_type}<br/>Confidence: {confidence:.2f}<br/>Context: {edge.data.get('context', 'N/A')[:100]}...",
+            "color": {
+                "color": edge_color_map.get(relationship_type, "#BDC3C7"),
+                "highlight": "#FFD700"
+            },
+            "width": 1 + (confidence * 4),  # Width based on confidence
+            "arrows": {"to": {"enabled": True, "scaleFactor": 1}},
+            "smooth": {"type": "continuous"},
+            "metadata": edge.data
+        }
+        edges.append(edge_data)
+    
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {
+            "total_nodes": len(nodes),
+            "total_edges": len(edges),
+            "entity_types": len(set(node.data.get("type", "node") for node in memory_banks[bank]["nodes"].values())),
+            "relationship_types": len(set(edge.data.get("type", "relation") for edge in memory_banks[bank]["edges"]))
+        }
+    }
+
+@app.get("/banks/{bank}/visualize")
+def visualize_graph(bank: str):
+    """
+    Serve interactive graph visualization page for a specific memory bank.
+    """
+    if bank not in memory_banks:
+        return JSONResponse(content={"error": "Bank not found"}, status_code=404)
+    
+    # HTML template with vis.js network visualization
+    html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Knowledge Graph Visualization - Bank: {bank}</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style type="text/css">
+        body {{
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }}
+        .header {{
+            text-align: center;
+            margin-bottom: 20px;
+        }}
+        .controls {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .control-group {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }}
+        #mynetworkid {{
+            width: 100%;
+            height: 600px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: white;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }}
+        .info-panel {{
+            margin-top: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .legend {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-top: 10px;
+        }}
+        .legend-item {{
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }}
+        .legend-color {{
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border: 1px solid #ccc;
+        }}
+        button {{
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            background: #4A90E2;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+        }}
+        button:hover {{
+            background: #357ABD;
+        }}
+        select, input {{
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }}
+        .stats {{
+            background: #e8f4fd;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🧠 Knowledge Graph Visualization</h1>
+        <h2>Memory Bank: <span style="color: #4A90E2;">{bank}</span></h2>
+    </div>
+    
+    <div class="controls">
+        <div class="control-group">
+            <label>Search:</label>
+            <input type="text" id="searchInput" placeholder="Search entities..." onkeyup="searchNodes()">
+        </div>
+        <div class="control-group">
+            <label>Layout:</label>
+            <select id="layoutSelect" onchange="changeLayout()">
+                <option value="physics">Force-Directed</option>
+                <option value="hierarchical">Hierarchical</option>
+                <option value="random">Random</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <button onclick="fitNetwork()">Fit to Screen</button>
+            <button onclick="exportNetwork()">Export PNG</button>
+            <button onclick="refreshData()">Refresh</button>
+        </div>
+    </div>
+    
+    <div id="mynetworkid"></div>
+    
+    <div class="info-panel">
+        <div id="networkStats" class="stats"></div>
+        <div id="selectedInfo"></div>
+        
+        <h3>Legend - Entity Types</h3>
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-color" style="background: #4A90E2;"></div>
+                <span>Named Entity</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #7ED321;"></div>
+                <span>Technical Term</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #9013FE;"></div>
+                <span>Concept</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #FF6B35;"></div>
+                <span>Contact Info</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #F5A623;"></div>
+                <span>Measurement</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #50E3C2;"></div>
+                <span>Date</span>
+            </div>
+        </div>
+        
+        <h3>Legend - Relationship Types</h3>
+        <div class="legend">
+            <div class="legend-item">
+                <div style="width: 20px; height: 3px; background: #E74C3C;"></div>
+                <span>Created</span>
+            </div>
+            <div class="legend-item">
+                <div style="width: 20px; height: 3px; background: #9B59B6;"></div>
+                <span>Known As</span>
+            </div>
+            <div class="legend-item">
+                <div style="width: 20px; height: 3px; background: #3498DB;"></div>
+                <span>Leads To</span>
+            </div>
+            <div class="legend-item">
+                <div style="width: 20px; height: 3px; background: #95A5A6;"></div>
+                <span>Related</span>
+            </div>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        let network;
+        let nodes, edges;
+        let allNodes, allEdges;
+        
+        // Initialize the network
+        async function initNetwork() {{
+            try {{
+                const response = await fetch('/banks/{bank}/graph-data');
+                const data = await response.json();
+                
+                if (data.error) {{
+                    document.getElementById('selectedInfo').innerHTML = `<p style="color: red;">Error: ${{data.error}}</p>`;
+                    return;
+                }}
+                
+                allNodes = new vis.DataSet(data.nodes);
+                allEdges = new vis.DataSet(data.edges);
+                nodes = allNodes;
+                edges = allEdges;
+                
+                const container = document.getElementById('mynetworkid');
+                const graphData = {{ nodes: nodes, edges: edges }};
+                
+                const options = {{
+                    physics: {{
+                        enabled: true,
+                        stabilization: {{ iterations: 200 }},
+                        barnesHut: {{ gravitationalConstant: -80000, springConstant: 0.001, springLength: 200 }}
+                    }},
+                    interaction: {{
+                        hover: true,
+                        selectConnectedEdges: false
+                    }},
+                    nodes: {{
+                        borderWidth: 2,
+                        shadow: true,
+                        font: {{ color: '#343434' }}
+                    }},
+                    edges: {{
+                        shadow: true,
+                        smooth: true,
+                        font: {{ color: '#343434', size: 10 }}
+                    }}
+                }};
+                
+                network = new vis.Network(container, graphData, options);
+                
+                // Event listeners
+                network.on("selectNode", function (params) {{
+                    if (params.nodes.length > 0) {{
+                        const nodeId = params.nodes[0];
+                        showNodeInfo(nodeId);
+                    }}
+                }});
+                
+                network.on("deselectNode", function () {{
+                    document.getElementById('selectedInfo').innerHTML = '<p>Click on a node to see details</p>';
+                }});
+                
+                // Update stats
+                updateStats(data.stats);
+                
+            }} catch (error) {{
+                console.error('Error loading graph data:', error);
+                document.getElementById('selectedInfo').innerHTML = `<p style="color: red;">Error loading graph: ${{error.message}}</p>`;
+            }}
+        }}
+        
+        function showNodeInfo(nodeId) {{
+            const node = allNodes.get(nodeId);
+            if (node) {{
+                const metadata = node.metadata || {{}};
+                const info = `
+                    <h4>📍 Selected Node: ${{node.label}}</h4>
+                    <p><strong>ID:</strong> ${{nodeId}}</p>
+                    <p><strong>Type:</strong> ${{metadata.type || 'Unknown'}}</p>
+                    <p><strong>Confidence:</strong> ${{(metadata.confidence || 0).toFixed(2)}}</p>
+                    <p><strong>Source:</strong> ${{metadata.source || 'N/A'}}</p>
+                    <p><strong>Created:</strong> ${{metadata.created_at || 'N/A'}}</p>
+                    ${{metadata.extracted_from ? `<p><strong>Extracted From:</strong> ${{metadata.extracted_from}}</p>` : ''}}
+                `;
+                document.getElementById('selectedInfo').innerHTML = info;
+            }}
+        }}
+        
+        function updateStats(stats) {{
+            document.getElementById('networkStats').innerHTML = `
+                <strong>📊 Graph Statistics:</strong>
+                ${{stats.total_nodes}} entities, ${{stats.total_edges}} relationships, 
+                ${{stats.entity_types}} entity types, ${{stats.relationship_types}} relationship types
+            `;
+        }}
+        
+        function searchNodes() {{
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            if (searchTerm === '') {{
+                // Reset all nodes to original style
+                const updates = allNodes.map(node => ({{
+                    id: node.id,
+                    color: node.color
+                }}));
+                nodes.update(updates);
+                return;
+            }}
+            
+            // Highlight matching nodes
+            const updates = allNodes.map(node => {{
+                const matches = node.label.toLowerCase().includes(searchTerm) || 
+                              node.id.toLowerCase().includes(searchTerm);
+                return {{
+                    id: node.id,
+                    color: matches ? 
+                        {{ background: '#FFD700', border: '#FFA500' }} : 
+                        {{ background: '#E0E0E0', border: '#CCCCCC' }}
+                }};
+            }});
+            nodes.update(updates);
+        }}
+        
+        function changeLayout() {{
+            const layout = document.getElementById('layoutSelect').value;
+            let options = {{}};
+            
+            if (layout === 'physics') {{
+                options = {{
+                    physics: {{ enabled: true }},
+                    layout: {{ randomSeed: 2 }}
+                }};
+            }} else if (layout === 'hierarchical') {{
+                options = {{
+                    physics: {{ enabled: false }},
+                    layout: {{
+                        hierarchical: {{
+                            direction: 'UD',
+                            sortMethod: 'directed'
+                        }}
+                    }}
+                }};
+            }} else if (layout === 'random') {{
+                options = {{
+                    physics: {{ enabled: false }},
+                    layout: {{ randomSeed: Math.random() }}
+                }};
+            }}
+            
+            network.setOptions(options);
+        }}
+        
+        function fitNetwork() {{
+            network.fit();
+        }}
+        
+        function exportNetwork() {{
+            const canvas = document.querySelector('#mynetworkid canvas');
+            if (canvas) {{
+                const link = document.createElement('a');
+                link.download = 'knowledge-graph-{bank}.png';
+                link.href = canvas.toDataURL();
+                link.click();
+            }}
+        }}
+        
+        function refreshData() {{
+            initNetwork();
+        }}
+        
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', initNetwork);
+    </script>
+</body>
+</html>
+    """
+    
+    return StreamingResponse(
+        iter([html_content]),
+        media_type="text/html"
+    )
+
+@app.get("/visualizations")
+def list_visualizations():
+    """
+    List available graph visualizations for all memory banks.
+    """
+    available_banks = list(memory_banks.keys())
+    visualizations = []
+    
+    for bank in available_banks:
+        bank_stats = {
+            "entities": len(memory_banks[bank]["nodes"]),
+            "relationships": len(memory_banks[bank]["edges"]),
+            "observations": len(memory_banks[bank]["observations"])
+        }
+        
+        visualizations.append({
+            "bank": bank,
+            "visualization_url": f"/banks/{bank}/visualize",
+            "data_url": f"/banks/{bank}/graph-data",
+            "stats": bank_stats
+        })
+    
+    return {
+        "available_visualizations": visualizations,
+        "total_banks": len(available_banks)
+    }
+
 @app.get("/")
 async def root(request: Request):
     """Root endpoint for compatibility - handles both JSON and SSE"""
@@ -1297,4 +1787,4 @@ if __name__ == "__main__":
     else:
         # Run as HTTP server (default)
         import uvicorn
-        uvicorn.run(app, host="0.0.0.0", port=8000)
+        uvicorn.run(app, host="0.0.0.0", port=10642)

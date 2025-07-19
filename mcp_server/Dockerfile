@@ -10,7 +10,7 @@ COPY main.py ./
 
 RUN pip install fastapi uvicorn pydantic
 
-EXPOSE 8000
+EXPOSE 10642
 
 # Default command runs HTTP server, but can be overridden for MCP stdio mode
 CMD ["python", "main.py"]

@@ -1,16 +1,146 @@
 # API Reference
 
-Complete REST API documentation for the Graph Memory MCP Server.
+Complete REST API documentation for the Graph Memory MCP Server with **Enhanced Knowledge Graph Creation and Interactive Visualization**.
 
 ## Base URL
 
 ```
-http://localhost:8000
+http://localhost:10642
 ```
 
 ## Authentication
 
 No authentication required for local deployment.
+
+## 🎨 NEW: Knowledge Graph Visualization
+
+### Interactive Visualization Interface
+
+```http
+GET /banks/{bank}/visualize
+```
+
+**Description:** Opens interactive web-based graph visualization with vis.js Network library.
+
+**Features:**
+- Color-coded entities (blue=named_entity, green=technical_term, purple=concept)
+- Interactive zoom, pan, search, and filtering
+- Multiple layout algorithms
+- Export to PNG capability
+
+**Example:**
+```
+http://localhost:10642/banks/default/visualize
+```
+
+### Graph Data for Visualization
+
+```http
+GET /banks/{bank}/graph-data
+```
+
+**Description:** Returns graph data formatted for vis.js Network visualization.
+
+**Response:**
+```json
+{
+  "nodes": [
+    {
+      "id": "entity_id",
+      "label": "Entity Name",
+      "title": "Type: named_entity<br/>Confidence: 0.80<br/>Source: document",
+      "color": {"background": "#4A90E2", "border": "#2B7CE9"},
+      "shape": "dot",
+      "size": 26.0,
+      "metadata": {...}
+    }
+  ],
+  "edges": [
+    {
+      "id": "relationship_id",
+      "from": "entity1",
+      "to": "entity2", 
+      "label": "relationship_type",
+      "title": "Type: created<br/>Confidence: 0.60<br/>Context: ...",
+      "color": {"color": "#E74C3C"},
+      "width": 3.4,
+      "metadata": {...}
+    }
+  ],
+  "stats": {
+    "total_nodes": 26,
+    "total_edges": 24,
+    "entity_types": 3,
+    "relationship_types": 12
+  }
+}
+```
+
+### List Available Visualizations
+
+```http
+GET /visualizations
+```
+
+**Description:** Lists all available graph visualizations across memory banks.
+
+**Response:**
+```json
+{
+  "available_visualizations": [
+    {
+      "bank": "default",
+      "visualization_url": "/banks/default/visualize",
+      "data_url": "/banks/default/graph-data",
+      "stats": {
+        "entities": 26,
+        "relationships": 24,
+        "observations": 35
+      }
+    }
+  ],
+  "total_banks": 1
+}
+```
+
+## 🧠 NEW: Advanced Knowledge Graph Creation
+
+### Ingest Knowledge from Large Text
+
+```http
+POST /knowledge/ingest
+```
+
+**Description:** Transform large text into sophisticated knowledge graphs with intelligent entity extraction and relationship detection.
+
+**Request Body:**
+```json
+{
+  "text": "Large text content for analysis...",
+  "source": "document_name",
+  "bank_name": "default"
+}
+```
+
+**Features:**
+- **Entity Types:** named_entity, technical_term, concept, email, url, measurement, date
+- **Relationship Detection:** Action (created, developed), categorical (like, known as), temporal (led to)
+- **Confidence Scoring:** 0.4-0.9 based on extraction quality
+- **Source Attribution:** Every element tagged with source document
+
+**Response:**
+```json
+{
+  "status": "success",
+  "extracted": {
+    "entities": 26,
+    "relationships": 24,
+    "observations": 35
+  },
+  "bank": "default",
+  "source": "document_name"
+}
+```
 
 ## Memory Banks
 
