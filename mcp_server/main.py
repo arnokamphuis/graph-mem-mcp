@@ -1241,269 +1241,577 @@ def visualize_graph(bank: str):
     if bank not in memory_banks:
         return JSONResponse(content={"error": "Bank not found"}, status_code=404)
     
-    # HTML template with vis.js network visualization
+    # Modern HTML template with vis.js network visualization
     html_content = f"""
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Knowledge Graph Visualization - Bank: {bank}</title>
     <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style type="text/css">
-        body {{
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f5f5f5;
+        * {{
+            box-sizing: border-box;
         }}
+        
+        :root {{
+            --primary-color: #667eea;
+            --primary-dark: #5a67d8;
+            --secondary-color: #764ba2;
+            --accent-color: #f093fb;
+            --success-color: #48bb78;
+            --warning-color: #ed8936;
+            --danger-color: #f56565;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-300: #d1d5db;
+            --gray-400: #9ca3af;
+            --gray-500: #6b7280;
+            --gray-600: #4b5563;
+            --gray-700: #374151;
+            --gray-800: #1f2937;
+            --gray-900: #111827;
+            --white: #ffffff;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }}
+        
+        body {{
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, var(--gray-50) 0%, var(--gray-100) 100%);
+            min-height: 100vh;
+            color: var(--gray-800);
+            line-height: 1.6;
+        }}
+        
+        .container {{
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 1.5rem;
+        }}
+        
         .header {{
             text-align: center;
-            margin-bottom: 20px;
+            margin-bottom: 2rem;
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: var(--shadow-lg);
         }}
-        .controls {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            padding: 10px;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        
+        .header h1 {{
+            margin: 0 0 0.5rem 0;
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(45deg, #ffffff, #e2e8f0);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }}
+        
+        .header h2 {{
+            margin: 0;
+            font-size: 1.25rem;
+            font-weight: 500;
+            opacity: 0.9;
+        }}
+        
+        .controls-container {{
+            background: var(--white);
+            border-radius: 1rem;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--gray-200);
+        }}
+        
+        .controls-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            align-items: start;
+        }}
+        
         .control-group {{
             display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }}
+        
+        .control-group label {{
+            font-weight: 600;
+            color: var(--gray-700);
+            font-size: 0.875rem;
+            display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 0.5rem;
         }}
-        .bank-selector {{
-            font-weight: bold;
-            background: linear-gradient(135deg, #e8f4fd 0%, #d4f1f4 100%);
-            padding: 12px 16px;
-            border-radius: 8px;
-            border: 2px solid #4A90E2;
-            box-shadow: 0 2px 8px rgba(74, 144, 226, 0.2);
+        
+        .control-row {{
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
         }}
-        .bank-selector label {{
-            font-size: 16px;
-            color: #2c3e50;
-        }}
-        .bank-selector select {{
-            font-weight: bold;
-            background: white;
-            border: 2px solid #4A90E2;
-            border-radius: 6px;
-            padding: 8px 12px;
-            font-size: 14px;
-            min-width: 200px;
-        }}
-        .bank-selector select:focus {{
-            outline: none;
-            border-color: #357ABD;
-            box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
-        }}
-        #refreshBanksBtn, #compareBanksBtn {{
-            padding: 8px 12px;
-            font-size: 14px;
-            background: #7ED321;
-            border-radius: 6px;
-            min-width: auto;
+        
+        .btn {{
+            padding: 0.75rem 1rem;
+            border: none;
+            border-radius: 0.5rem;
+            font-weight: 500;
+            font-size: 0.875rem;
+            cursor: pointer;
             transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            text-decoration: none;
+            white-space: nowrap;
         }}
-        #refreshBanksBtn:hover, #compareBanksBtn:hover {{
-            background: #6BC315;
+        
+        .btn:hover {{
             transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
         }}
-        #compareBanksBtn {{
-            background: #9B59B6;
-        }}
-        #compareBanksBtn:hover {{
-            background: #8E44AD;
-        }}
-        .bank-creator input {{
-            font-weight: normal;
-            background: white;
-            border: 2px solid #28a745;
-            border-radius: 6px;
-            padding: 8px 12px;
-            font-size: 14px;
-            min-width: 150px;
-        }}
-        .bank-creator input:focus {{
-            outline: none;
-            border-color: #1e7e34;
-            box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.1);
-        }}
-        #createBankBtn {{
-            padding: 8px 12px;
-            font-size: 14px;
-            background: #28a745;
-            border-radius: 6px;
-            min-width: auto;
-            transition: all 0.2s ease;
-        }}
-        #createBankBtn:hover {{
-            background: #1e7e34;
-            transform: translateY(-1px);
-        }}
-        #clearSearchBtn {{
-            padding: 6px 10px;
-            font-size: 12px;
-            background: #E74C3C;
+        
+        .btn-primary {{
+            background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
             color: white;
-            border-radius: 4px;
+        }}
+        
+        .btn-secondary {{
+            background: linear-gradient(135deg, var(--secondary-color), #5a4fb3);
+            color: white;
+        }}
+        
+        .btn-success {{
+            background: linear-gradient(135deg, var(--success-color), #38a169);
+            color: white;
+        }}
+        
+        .btn-warning {{
+            background: linear-gradient(135deg, var(--warning-color), #dd6b20);
+            color: white;
+        }}
+        
+        .btn-danger {{
+            background: linear-gradient(135deg, var(--danger-color), #e53e3e);
+            color: white;
+        }}
+        
+        .btn-outline {{
+            background: transparent;
+            color: var(--gray-600);
+            border: 2px solid var(--gray-300);
+        }}
+        
+        .btn-outline:hover {{
+            background: var(--gray-50);
+            border-color: var(--gray-400);
+        }}
+        
+        .form-input, .form-select {{
+            padding: 0.75rem;
+            border: 2px solid var(--gray-300);
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            background: white;
             transition: all 0.2s ease;
+            width: 100%;
         }}
-        #clearSearchBtn:hover {{
-            background: #C0392B;
-            transform: translateY(-1px);
+        
+        .form-input:focus, .form-select:focus {{
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
         }}
+        
+        .bank-selector {{
+            background: linear-gradient(135deg, #e0f2fe 0%, #b3e5fc 100%);
+            padding: 1rem;
+            border-radius: 0.75rem;
+            border: 2px solid var(--primary-color);
+        }}
+        
+        .network-container {{
+            background: var(--white);
+            border-radius: 1rem;
+            overflow: hidden;
+            box-shadow: var(--shadow-lg);
+            border: 1px solid var(--gray-200);
+        }}
+        
         #mynetworkid {{
             width: 100%;
-            height: 600px;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            background: white;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            height: 70vh;
+            min-height: 600px;
+            background: linear-gradient(135deg, #fafafa 0%, #ffffff 100%);
         }}
+        
         .info-panel {{
-            margin-top: 20px;
-            padding: 15px;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            background: var(--white);
+            border-radius: 1rem;
+            padding: 1.5rem;
+            margin-top: 2rem;
+            box-shadow: var(--shadow-md);
+            border: 1px solid var(--gray-200);
         }}
-        .legend {{
+        
+        .stats-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }}
+        
+        .stat-card {{
+            background: linear-gradient(135deg, var(--gray-50) 0%, var(--white) 100%);
+            padding: 1rem;
+            border-radius: 0.75rem;
+            border: 1px solid var(--gray-200);
+            text-align: center;
+        }}
+        
+        .stat-number {{
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary-color);
+            margin-bottom: 0.25rem;
+        }}
+        
+        .stat-label {{
+            font-size: 0.875rem;
+            color: var(--gray-600);
+            font-weight: 500;
+        }}
+        
+        .legend-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+        }}
+        
+        .legend-section {{
+            background: var(--gray-50);
+            padding: 1rem;
+            border-radius: 0.75rem;
+            border: 1px solid var(--gray-200);
+        }}
+        
+        .legend-title {{
+            font-weight: 600;
+            color: var(--gray-700);
+            margin-bottom: 0.75rem;
             display: flex;
-            flex-wrap: wrap;
-            gap: 15px;
-            margin-top: 10px;
+            align-items: center;
+            gap: 0.5rem;
         }}
+        
+        .legend-items {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 0.5rem;
+        }}
+        
         .legend-item {{
             display: flex;
             align-items: center;
-            gap: 5px;
+            gap: 0.5rem;
+            padding: 0.25rem;
+            border-radius: 0.25rem;
+            font-size: 0.875rem;
         }}
+        
         .legend-color {{
-            width: 16px;
-            height: 16px;
+            width: 12px;
+            height: 12px;
             border-radius: 50%;
-            border: 1px solid #ccc;
+            border: 1px solid var(--gray-300);
+            flex-shrink: 0;
         }}
-        button {{
-            padding: 8px 16px;
-            border: none;
-            border-radius: 4px;
-            background: #4A90E2;
-            color: white;
+        
+        .legend-line {{
+            width: 20px;
+            height: 3px;
+            border-radius: 1.5px;
+            flex-shrink: 0;
+        }}
+        
+        .modal-overlay {{
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }}
+        
+        .modal {{
+            background: white;
+            border-radius: 1rem;
+            padding: 2rem;
+            max-width: 600px;
+            width: 100%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: var(--shadow-xl);
+        }}
+        
+        .modal-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }}
+        
+        .modal-title {{
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--gray-800);
+            margin: 0;
+        }}
+        
+        .bank-card {{
+            border: 2px solid var(--gray-200);
+            border-radius: 0.75rem;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
             cursor: pointer;
-            font-size: 14px;
+            transition: all 0.2s ease;
+            background: var(--white);
         }}
-        button:hover {{
-            background: #357ABD;
+        
+        .bank-card:hover {{
+            border-color: var(--primary-color);
+            box-shadow: var(--shadow-md);
         }}
-        select, input {{
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
+        
+        .bank-card.active {{
+            border-color: var(--primary-color);
+            background: linear-gradient(135deg, #e0f2fe 0%, #f8faff 100%);
         }}
-        .stats {{
-            background: #e8f4fd;
-            padding: 10px;
-            border-radius: 4px;
-            margin-bottom: 10px;
+        
+        .bank-name {{
+            font-weight: 600;
+            color: var(--gray-800);
+            margin-bottom: 0.25rem;
+        }}
+        
+        .bank-stats {{
+            font-size: 0.875rem;
+            color: var(--gray-600);
+        }}
+        
+        .alert {{
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+            border-left: 4px solid;
+        }}
+        
+        .alert-success {{
+            background: #f0fff4;
+            border-color: var(--success-color);
+            color: #22543d;
+        }}
+        
+        .alert-error {{
+            background: #fef2f2;
+            border-color: var(--danger-color);
+            color: #742a2a;
+        }}
+        
+        .alert-info {{
+            background: #eff6ff;
+            border-color: var(--primary-color);
+            color: #1e3a8a;
+        }}
+        
+        @media (max-width: 768px) {{
+            .container {{
+                padding: 1rem;
+            }}
+            
+            .controls-grid {{
+                grid-template-columns: 1fr;
+                gap: 1rem;
+            }}
+            
+            .header h1 {{
+                font-size: 2rem;
+            }}
+            
+            .control-row {{
+                flex-wrap: wrap;
+            }}
+            
+            #mynetworkid {{
+                height: 50vh;
+                min-height: 400px;
+            }}
+            
+            .stats-grid {{
+                grid-template-columns: repeat(2, 1fr);
+            }}
+            
+            .legend-items {{
+                grid-template-columns: 1fr;
+            }}
         }}
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>🧠 Knowledge Graph Visualization</h1>
-        <h2>Memory Bank: <span style="color: #4A90E2;">{bank}</span></h2>
-    </div>
-    
-    <div class="controls">
-        <div class="control-group bank-selector">
-            <label>🏦 Memory Bank:</label>
-            <select id="bankSelect" onchange="switchToBank()">
-                <option value="{bank}">{bank}</option>
-            </select>
-            <button onclick="loadAvailableBanks()" id="refreshBanksBtn" title="Refresh bank list">🔄</button>
-            <button onclick="compareBanks()" id="compareBanksBtn" title="Compare all banks">📊</button>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-brain"></i> Knowledge Graph Visualization</h1>
+            <h2>Memory Bank: <span style="color: rgba(255,255,255,0.9);">{bank}</span></h2>
         </div>
-        <div class="control-group bank-creator">
-            <label>➕ Create Bank:</label>
-            <input type="text" id="newBankInput" placeholder="Enter bank name..." maxlength="50">
-            <button onclick="createNewBank()" id="createBankBtn" title="Create new bank">Create</button>
-        </div>
-        <div class="control-group">
-            <label>🔍 Search:</label>
-            <input type="text" id="searchInput" placeholder="Search entities..." onkeyup="searchNodes()">
-            <button onclick="clearSearch()" id="clearSearchBtn" title="Clear search">✖️</button>
-        </div>
-        <div class="control-group">
-            <label>🎨 Layout:</label>
-            <select id="layoutSelect" onchange="changeLayout()">
-                <option value="physics">Force-Directed</option>
-                <option value="hierarchical">Hierarchical</option>
-                <option value="random">Random</option>
-            </select>
-        </div>
-        <div class="control-group">
-            <button onclick="fitNetwork()">🔍 Fit to Screen</button>
-            <button onclick="exportNetwork()">💾 Export PNG</button>
-            <button onclick="refreshData()">🔄 Refresh</button>
-        </div>
-    </div>
-    
-    <div id="mynetworkid"></div>
-    
-    <div class="info-panel">
-        <div id="networkStats" class="stats"></div>
-        <div id="selectedInfo"></div>
         
-        <h3>Legend - Entity Types</h3>
-        <div class="legend">
-            <div class="legend-item">
-                <div class="legend-color" style="background: #4A90E2;"></div>
-                <span>Named Entity</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-color" style="background: #7ED321;"></div>
-                <span>Technical Term</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-color" style="background: #9013FE;"></div>
-                <span>Concept</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-color" style="background: #FF6B35;"></div>
-                <span>Contact Info</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-color" style="background: #F5A623;"></div>
-                <span>Measurement</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-color" style="background: #50E3C2;"></div>
-                <span>Date</span>
+        <div class="controls-container">
+            <div class="controls-grid">
+                <div class="control-group bank-selector">
+                    <label><i class="fas fa-database"></i> Memory Bank</label>
+                    <div class="control-row">
+                        <select id="bankSelect" class="form-select" onchange="switchToBank()">
+                            <option value="{bank}">{bank}</option>
+                        </select>
+                        <button onclick="loadAvailableBanks()" class="btn btn-primary" title="Refresh bank list">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                        <button onclick="compareBanks()" class="btn btn-secondary" title="Compare all banks">
+                            <i class="fas fa-chart-bar"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="control-group">
+                    <label><i class="fas fa-plus-circle"></i> Create Bank</label>
+                    <div class="control-row">
+                        <input type="text" id="newBankInput" class="form-input" placeholder="Enter bank name..." maxlength="50">
+                        <button onclick="createNewBank()" class="btn btn-success" title="Create new bank">
+                            <i class="fas fa-plus"></i> Create
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="control-group">
+                    <label><i class="fas fa-search"></i> Search Entities</label>
+                    <div class="control-row">
+                        <input type="text" id="searchInput" class="form-input" placeholder="Search entities..." onkeyup="searchNodes()">
+                        <button onclick="clearSearch()" class="btn btn-outline" title="Clear search">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="control-group">
+                    <label><i class="fas fa-project-diagram"></i> Layout</label>
+                    <select id="layoutSelect" class="form-select" onchange="changeLayout()">
+                        <option value="physics">Force-Directed</option>
+                        <option value="hierarchical">Hierarchical</option>
+                        <option value="random">Random</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label><i class="fas fa-tools"></i> Actions</label>
+                    <div class="control-row">
+                        <button onclick="fitNetwork()" class="btn btn-outline" title="Fit to screen">
+                            <i class="fas fa-expand-arrows-alt"></i>
+                        </button>
+                        <button onclick="exportNetwork()" class="btn btn-outline" title="Export as PNG">
+                            <i class="fas fa-download"></i>
+                        </button>
+                        <button onclick="refreshData()" class="btn btn-outline" title="Refresh data">
+                            <i class="fas fa-redo"></i>
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
         
-        <h3>Legend - Relationship Types</h3>
-        <div class="legend">
-            <div class="legend-item">
-                <div style="width: 20px; height: 3px; background: #E74C3C;"></div>
-                <span>Created</span>
+        <div class="network-container">
+            <div id="mynetworkid"></div>
+        </div>
+        
+        <div class="info-panel">
+            <div id="networkStats" class="stats-grid"></div>
+            <div id="selectedInfo">
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle"></i> Click on a node to see details
+                </div>
             </div>
-            <div class="legend-item">
-                <div style="width: 20px; height: 3px; background: #9B59B6;"></div>
-                <span>Known As</span>
-            </div>
-            <div class="legend-item">
-                <div style="width: 20px; height: 3px; background: #3498DB;"></div>
-                <span>Leads To</span>
-            </div>
-            <div class="legend-item">
-                <div style="width: 20px; height: 3px; background: #95A5A6;"></div>
-                <span>Related</span>
+            
+            <div class="legend-grid">
+                <div class="legend-section">
+                    <div class="legend-title">
+                        <i class="fas fa-shapes"></i> Entity Types
+                    </div>
+                    <div class="legend-items">
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #667eea;"></div>
+                            <span>Named Entity</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #48bb78;"></div>
+                            <span>Technical Term</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #764ba2;"></div>
+                            <span>Concept</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #f56565;"></div>
+                            <span>Contact Info</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #ed8936;"></div>
+                            <span>Measurement</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background: #38b2ac;"></div>
+                            <span>Date</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="legend-section">
+                    <div class="legend-title">
+                        <i class="fas fa-link"></i> Relationship Types
+                    </div>
+                    <div class="legend-items">
+                        <div class="legend-item">
+                            <div class="legend-line" style="background: #f56565;"></div>
+                            <span>Created</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-line" style="background: #764ba2;"></div>
+                            <span>Known As</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-line" style="background: #667eea;"></div>
+                            <span>Leads To</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-line" style="background: #6b7280;"></div>
+                            <span>Related</span>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -1561,7 +1869,11 @@ def visualize_graph(bank: str):
                 
             }} catch (error) {{
                 console.error('Error loading available banks:', error);
-                document.getElementById('selectedInfo').innerHTML = `<p style="color: red;">Error loading banks: ${{error.message}}</p>`;
+                document.getElementById('selectedInfo').innerHTML = `
+                    <div class="alert alert-error">
+                        <i class="fas fa-exclamation-triangle"></i> Error loading banks: ${{error.message}}
+                    </div>
+                `;
             }}
         }}
         
@@ -1579,11 +1891,9 @@ def visualize_graph(bank: str):
             const bankStats = selectedBankInfo ? selectedBankInfo.stats : {{ entities: '?', relationships: '?', observations: '?' }};
             
             document.getElementById('selectedInfo').innerHTML = `
-                <div style="padding: 12px; background: #e8f4fd; border-radius: 6px; border-left: 4px solid #4A90E2;">
-                    <p style="margin: 0; font-weight: bold; color: #2c3e50;">🔄 Switching to bank: ${{selectedBank}}</p>
-                    <p style="margin: 4px 0 0 0; font-size: 12px; color: #666;">
-                        Loading ${{bankStats.entities}} entities and ${{bankStats.relationships}} relationships...
-                    </p>
+                <div class="alert alert-info">
+                    <i class="fas fa-spinner fa-spin"></i> Switching to bank: <strong>${{selectedBank}}</strong>
+                    <br><small>Loading ${{bankStats.entities}} entities and ${{bankStats.relationships}} relationships...</small>
                 </div>
             `;
             
@@ -1593,7 +1903,7 @@ def visualize_graph(bank: str):
             // Update page title and header with enhanced info
             const totalBanks = availableBanks.length;
             document.title = `Knowledge Graph Visualization - Bank: ${{selectedBank}} (${{totalBanks}} banks available)`;
-            document.querySelector('.header h2').innerHTML = `Memory Bank: <span style="color: #4A90E2;">${{selectedBank}}</span> <small style="color: #666;">(1 of ${{totalBanks}})</small>`;
+            document.querySelector('.header h2').innerHTML = `Memory Bank: <span style="color: rgba(255,255,255,0.9);">${{selectedBank}}</span> <small style="opacity: 0.7;">(1 of ${{totalBanks}})</small>`;
             
             // Update browser URL without reload
             const newUrl = `/banks/${{selectedBank}}/visualize`;
@@ -1666,11 +1976,9 @@ def visualize_graph(bank: str):
                     
                     // Show success message
                     document.getElementById('selectedInfo').innerHTML = `
-                        <div style="padding: 12px; background: #d4edda; border-radius: 6px; border-left: 4px solid #28a745;">
-                            <p style="margin: 0; font-weight: bold; color: #155724;">✅ Bank "${{bankName}}" created successfully!</p>
-                            <p style="margin: 4px 0 0 0; font-size: 12px; color: #666;">
-                                You can now add entities and relationships to this bank.
-                            </p>
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle"></i> Bank "<strong>${{bankName}}</strong>" created successfully!
+                            <br><small>You can now add entities and relationships to this bank.</small>
                         </div>
                     `;
                 }} else {{
@@ -1689,7 +1997,11 @@ def visualize_graph(bank: str):
                 const data = await response.json();
                 
                 if (data.error) {{
-                    document.getElementById('selectedInfo').innerHTML = `<p style="color: red;">Error: ${{data.error}}</p>`;
+                    document.getElementById('selectedInfo').innerHTML = `
+                        <div class="alert alert-error">
+                            <i class="fas fa-exclamation-circle"></i> Error: ${{data.error}}
+                        </div>
+                    `;
                     return;
                 }}
                 
@@ -1738,7 +2050,11 @@ def visualize_graph(bank: str):
                 }});
                 
                 network.on("deselectNode", function () {{
-                    document.getElementById('selectedInfo').innerHTML = '<p>Click on a node to see details</p>';
+                    document.getElementById('selectedInfo').innerHTML = `
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i> Click on a node to see details
+                        </div>
+                    `;
                 }});
                 
                 // Update stats
@@ -1746,7 +2062,11 @@ def visualize_graph(bank: str):
                 
             }} catch (error) {{
                 console.error('Error loading graph data:', error);
-                document.getElementById('selectedInfo').innerHTML = `<p style="color: red;">Error loading graph: ${{error.message}}</p>`;
+                document.getElementById('selectedInfo').innerHTML = `
+                    <div class="alert alert-error">
+                        <i class="fas fa-exclamation-triangle"></i> Error loading graph: ${{error.message}}
+                    </div>
+                `;
             }}
         }}
         
@@ -1755,13 +2075,19 @@ def visualize_graph(bank: str):
             if (node) {{
                 const metadata = node.metadata || {{}};
                 const info = `
-                    <h4>📍 Selected Node: ${{node.label}}</h4>
-                    <p><strong>ID:</strong> ${{nodeId}}</p>
-                    <p><strong>Type:</strong> ${{metadata.type || 'Unknown'}}</p>
-                    <p><strong>Confidence:</strong> ${{(metadata.confidence || 0).toFixed(2)}}</p>
-                    <p><strong>Source:</strong> ${{metadata.source || 'N/A'}}</p>
-                    <p><strong>Created:</strong> ${{metadata.created_at || 'N/A'}}</p>
-                    ${{metadata.extracted_from ? `<p><strong>Extracted From:</strong> ${{metadata.extracted_from}}</p>` : ''}}
+                    <div class="alert alert-info">
+                        <h4 style="margin: 0 0 1rem 0; color: var(--primary-color);">
+                            <i class="fas fa-dot-circle"></i> Selected Node: ${{node.label}}
+                        </h4>
+                        <div style="display: grid; gap: 0.5rem; font-size: 0.875rem;">
+                            <div><strong>ID:</strong> ${{nodeId}}</div>
+                            <div><strong>Type:</strong> ${{metadata.type || 'Unknown'}}</div>
+                            <div><strong>Confidence:</strong> ${{(metadata.confidence || 0).toFixed(2)}}</div>
+                            <div><strong>Source:</strong> ${{metadata.source || 'N/A'}}</div>
+                            <div><strong>Created:</strong> ${{metadata.created_at || 'N/A'}}</div>
+                            ${{metadata.extracted_from ? `<div><strong>Extracted From:</strong> ${{metadata.extracted_from}}</div>` : ''}}
+                        </div>
+                    </div>
                 `;
                 document.getElementById('selectedInfo').innerHTML = info;
             }}
@@ -1769,9 +2095,22 @@ def visualize_graph(bank: str):
         
         function updateStats(stats) {{
             document.getElementById('networkStats').innerHTML = `
-                <strong>📊 Graph Statistics:</strong>
-                ${{stats.total_nodes}} entities, ${{stats.total_edges}} relationships, 
-                ${{stats.entity_types}} entity types, ${{stats.relationship_types}} relationship types
+                <div class="stat-card">
+                    <div class="stat-number">${{stats.total_nodes}}</div>
+                    <div class="stat-label">Entities</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${{stats.total_edges}}</div>
+                    <div class="stat-label">Relationships</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${{stats.entity_types}}</div>
+                    <div class="stat-label">Entity Types</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${{stats.relationship_types}}</div>
+                    <div class="stat-label">Relationship Types</div>
+                </div>
             `;
         }}
         
@@ -1781,75 +2120,59 @@ def visualize_graph(bank: str):
         }}
         
         function compareBanks() {{
-            // Create a comparison popup showing all banks
-            const popup = document.createElement('div');
-            popup.id = 'bankComparison';
-            popup.style.cssText = `
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                background: white;
-                border-radius: 12px;
-                padding: 24px;
-                box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-                z-index: 1000;
-                max-width: 600px;
-                max-height: 70vh;
-                overflow-y: auto;
-            `;
+            // Create a modern comparison modal
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            
+            const modal = document.createElement('div');
+            modal.className = 'modal';
             
             let content = `
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                    <h3 style="margin: 0; color: #2c3e50;">🏦 Memory Banks Comparison</h3>
-                    <button onclick="document.getElementById('bankComparison').remove()" 
-                            style="background: #E74C3C; color: white; border: none; border-radius: 50%; width: 30px; height: 30px; cursor: pointer;">✖</button>
+                <div class="modal-header">
+                    <h3 class="modal-title">
+                        <i class="fas fa-database"></i> Memory Banks Comparison
+                    </h3>
+                    <button onclick="this.closest('.modal-overlay').remove()" class="btn btn-outline" style="padding: 0.5rem; width: 2.5rem; height: 2.5rem;">
+                        <i class="fas fa-times"></i>
+                    </button>
                 </div>
-                <div style="display: grid; gap: 12px;">
+                <div style="margin-bottom: 1rem; color: var(--gray-600); font-size: 0.875rem;">
+                    Click on any bank to switch to it
+                </div>
             `;
             
             availableBanks.forEach(bankInfo => {{
                 const isActive = bankInfo.bank === currentBank;
                 content += `
-                    <div style="border: 2px solid ${{isActive ? '#4A90E2' : '#ddd'}}; border-radius: 8px; padding: 12px; 
-                                background: ${{isActive ? '#e8f4fd' : 'white'}}; cursor: pointer;"
-                         onclick="selectBankFromComparison('${{bankInfo.bank}}')">
-                        <div style="font-weight: bold; color: ${{isActive ? '#4A90E2' : '#2c3e50'}}; margin-bottom: 4px;">
-                            ${{isActive ? '🎯 ' : ''}}${{bankInfo.bank}}
+                    <div class="bank-card ${{isActive ? 'active' : ''}}" onclick="selectBankFromComparison('${{bankInfo.bank}}')">
+                        <div class="bank-name">
+                            ${{isActive ? '<i class="fas fa-check-circle" style="color: var(--primary-color);"></i> ' : ''}}
+                            ${{bankInfo.bank}}
                         </div>
-                        <div style="font-size: 12px; color: #666;">
-                            📊 ${{bankInfo.stats.entities}} entities • 🔗 ${{bankInfo.stats.relationships}} relationships • 📝 ${{bankInfo.stats.observations}} observations
+                        <div class="bank-stats">
+                            <i class="fas fa-shapes"></i> ${{bankInfo.stats.entities}} entities • 
+                            <i class="fas fa-link"></i> ${{bankInfo.stats.relationships}} relationships • 
+                            <i class="fas fa-sticky-note"></i> ${{bankInfo.stats.observations}} observations
                         </div>
                     </div>
                 `;
             }});
             
-            content += `</div>`;
-            popup.innerHTML = content;
+            modal.innerHTML = content;
+            overlay.appendChild(modal);
             
-            // Create backdrop
-            const backdrop = document.createElement('div');
-            backdrop.style.cssText = `
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: rgba(0,0,0,0.5);
-                z-index: 999;
-            `;
-            backdrop.onclick = () => {{
-                document.body.removeChild(backdrop);
-                document.body.removeChild(popup);
+            // Close on backdrop click
+            overlay.onclick = (e) => {{
+                if (e.target === overlay) {{
+                    overlay.remove();
+                }}
             }};
             
-            document.body.appendChild(backdrop);
-            document.body.appendChild(popup);
+            document.body.appendChild(overlay);
         }}
         
         function selectBankFromComparison(bankName) {{
-            document.getElementById('bankComparison').remove();
-            document.querySelector('[style*="backdrop"]')?.remove();
+            document.querySelector('.modal-overlay').remove();
             document.getElementById('bankSelect').value = bankName;
             switchToBank();
         }}
