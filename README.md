@@ -91,17 +91,21 @@ open http://localhost:10642/banks/default/visualize
 The server now includes **beautiful web-based interactive visualization** powered by vis.js Network library:
 
 ### Key Visualization Features:
-- **🌈 Color-Coded Entities**: Blue (named entities), Green (technical terms), Purple (concepts)
+- **� Dynamic Bank Switching**: Switch between memory banks without page reload
+- **📊 Bank Statistics**: View entity and relationship counts for each bank
+- **�🌈 Color-Coded Entities**: Blue (named entities), Green (technical terms), Purple (concepts)
 - **📏 Smart Sizing**: Node size reflects confidence scores
 - **🔗 Relationship Styling**: Edge thickness and colors based on relationship type and confidence
 - **🔍 Interactive Controls**: Zoom, pan, search, filter entities and relationships
 - **📐 Multiple Layouts**: Choose from hierarchical, force-directed, or custom arrangements
-- **💾 Export Capability**: Save visualizations as PNG images
+- **💾 Export Capability**: Save visualizations as PNG images with bank-specific names
 - **⚡ Real-time Updates**: Dynamic visualization updates as knowledge graphs evolve
+- **🔄 State Preservation**: Maintains search terms and layout when switching banks
 
 ### Access Your Visualizations:
-- **Interactive Interface**: `http://localhost:10642/banks/default/visualize`
-- **Graph Data API**: `http://localhost:10642/banks/default/graph-data`
+- **Main Interface with Bank Switching**: `http://localhost:10642/visualize`
+- **Bank-Specific Interface**: `http://localhost:10642/banks/{bank}/visualize`
+- **Graph Data API**: `http://localhost:10642/banks/{bank}/graph-data`
 - **Available Visualizations**: `http://localhost:10642/visualizations`
 
 ## 🧠 **NEW: Advanced Knowledge Graph Creation**

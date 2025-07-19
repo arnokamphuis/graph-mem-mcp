@@ -45,11 +45,10 @@ def sse_events():
 async def log_requests(request: Request, call_next):
     logging.info(f"Incoming request: {request.method} {request.url}")
     logging.info(f"Headers: {dict(request.headers)}")
-    try:
-        body = await request.body()
-        logging.info(f"Request body: {body.decode('utf-8') if body else '<empty>'}")
-    except Exception as e:
-        logging.info(f"Could not read request body: {e}")
+    
+    # Don't consume the request body in middleware - this prevents route handlers from reading it!
+    # The actual route handlers will read the body when needed
+    
     response = await call_next(request)
     logging.info(f"Response status: {response.status_code}")
     return response
@@ -103,12 +102,31 @@ def serialize_memory_banks():
     """Convert memory banks to JSON-serializable format"""
     serialized = {}
     for bank_name, bank_data in memory_banks.items():
-        serialized[bank_name] = {
-            "nodes": {node_id: node.model_dump() for node_id, node in bank_data["nodes"].items()},
-            "edges": [edge.dict() for edge in bank_data["edges"]],
-            "observations": [obs.dict() for obs in bank_data["observations"]],
-            "reasoning_steps": [step.dict() for step in bank_data["reasoning_steps"]]
-        }
+        try:
+            # Use dict() instead of model_dump() for compatibility
+            nodes_dict = {}
+            for node_id, node in bank_data["nodes"].items():
+                try:
+                    # Try model_dump first, fallback to dict
+                    nodes_dict[node_id] = node.model_dump() if hasattr(node, 'model_dump') else node.dict()
+                except Exception:
+                    # If that fails, create manual dict
+                    nodes_dict[node_id] = {
+                        "id": node.id,
+                        "data": node.data,
+                        "created_at": node.created_at
+                    }
+            
+            serialized[bank_name] = {
+                "nodes": nodes_dict,
+                "edges": [edge.dict() for edge in bank_data["edges"]],
+                "observations": [obs.dict() for obs in bank_data["observations"]],
+                "reasoning_steps": [step.dict() for step in bank_data["reasoning_steps"]]
+            }
+        except Exception as e:
+            logger.error(f"Error serializing bank {bank_name}: {e}")
+            # Skip problematic bank rather than failing entirely
+            continue
     return serialized
 
 def deserialize_memory_banks(data):
@@ -127,11 +145,21 @@ def save_memory_banks():
     """Save memory banks to persistent storage"""
     try:
         serialized_data = serialize_memory_banks()
-        with open(MEMORY_FILE, 'w') as f:
+        
+        # Ensure DATA_DIR exists and is writable
+        DATA_DIR.mkdir(exist_ok=True)
+        
+        # Write to temp file first, then rename for atomic operation
+        temp_file = MEMORY_FILE.with_suffix('.tmp')
+        with open(temp_file, 'w') as f:
             json.dump(serialized_data, f, indent=2)
+        
+        # Atomic rename
+        temp_file.rename(MEMORY_FILE)
         logger.info(f"Memory banks saved to {MEMORY_FILE}")
     except Exception as e:
         logger.error(f"Failed to save memory banks: {e}")
+        # Continue execution even if save fails - data persists in memory
 
 def load_memory_banks():
     """Load memory banks from persistent storage"""
@@ -171,8 +199,17 @@ def create_bank(op: BankOp):
     """
     if op.bank in memory_banks:
         return {"status": "error", "message": "Bank already exists."}
+    
+    # Create the new bank
     memory_banks[op.bank] = {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}
-    save_memory_banks()  # Persist the change
+    
+    # Save to disk
+    try:
+        save_memory_banks()
+    except Exception as e:
+        logger.warning(f"Could not save memory banks: {e}")
+        # Continue anyway - bank is created in memory
+    
     return {"status": "success", "bank": op.bank}
 
 @app.post("/banks/select")
@@ -1237,6 +1274,88 @@ def visualize_graph(bank: str):
             align-items: center;
             gap: 10px;
         }}
+        .bank-selector {{
+            font-weight: bold;
+            background: linear-gradient(135deg, #e8f4fd 0%, #d4f1f4 100%);
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 2px solid #4A90E2;
+            box-shadow: 0 2px 8px rgba(74, 144, 226, 0.2);
+        }}
+        .bank-selector label {{
+            font-size: 16px;
+            color: #2c3e50;
+        }}
+        .bank-selector select {{
+            font-weight: bold;
+            background: white;
+            border: 2px solid #4A90E2;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 14px;
+            min-width: 200px;
+        }}
+        .bank-selector select:focus {{
+            outline: none;
+            border-color: #357ABD;
+            box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+        }}
+        #refreshBanksBtn, #compareBanksBtn {{
+            padding: 8px 12px;
+            font-size: 14px;
+            background: #7ED321;
+            border-radius: 6px;
+            min-width: auto;
+            transition: all 0.2s ease;
+        }}
+        #refreshBanksBtn:hover, #compareBanksBtn:hover {{
+            background: #6BC315;
+            transform: translateY(-1px);
+        }}
+        #compareBanksBtn {{
+            background: #9B59B6;
+        }}
+        #compareBanksBtn:hover {{
+            background: #8E44AD;
+        }}
+        .bank-creator input {{
+            font-weight: normal;
+            background: white;
+            border: 2px solid #28a745;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 14px;
+            min-width: 150px;
+        }}
+        .bank-creator input:focus {{
+            outline: none;
+            border-color: #1e7e34;
+            box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.1);
+        }}
+        #createBankBtn {{
+            padding: 8px 12px;
+            font-size: 14px;
+            background: #28a745;
+            border-radius: 6px;
+            min-width: auto;
+            transition: all 0.2s ease;
+        }}
+        #createBankBtn:hover {{
+            background: #1e7e34;
+            transform: translateY(-1px);
+        }}
+        #clearSearchBtn {{
+            padding: 6px 10px;
+            font-size: 12px;
+            background: #E74C3C;
+            color: white;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }}
+        #clearSearchBtn:hover {{
+            background: #C0392B;
+            transform: translateY(-1px);
+        }}
         #mynetworkid {{
             width: 100%;
             height: 600px;
@@ -1301,12 +1420,26 @@ def visualize_graph(bank: str):
     </div>
     
     <div class="controls">
-        <div class="control-group">
-            <label>Search:</label>
-            <input type="text" id="searchInput" placeholder="Search entities..." onkeyup="searchNodes()">
+        <div class="control-group bank-selector">
+            <label>🏦 Memory Bank:</label>
+            <select id="bankSelect" onchange="switchToBank()">
+                <option value="{bank}">{bank}</option>
+            </select>
+            <button onclick="loadAvailableBanks()" id="refreshBanksBtn" title="Refresh bank list">🔄</button>
+            <button onclick="compareBanks()" id="compareBanksBtn" title="Compare all banks">📊</button>
+        </div>
+        <div class="control-group bank-creator">
+            <label>➕ Create Bank:</label>
+            <input type="text" id="newBankInput" placeholder="Enter bank name..." maxlength="50">
+            <button onclick="createNewBank()" id="createBankBtn" title="Create new bank">Create</button>
         </div>
         <div class="control-group">
-            <label>Layout:</label>
+            <label>🔍 Search:</label>
+            <input type="text" id="searchInput" placeholder="Search entities..." onkeyup="searchNodes()">
+            <button onclick="clearSearch()" id="clearSearchBtn" title="Clear search">✖️</button>
+        </div>
+        <div class="control-group">
+            <label>🎨 Layout:</label>
             <select id="layoutSelect" onchange="changeLayout()">
                 <option value="physics">Force-Directed</option>
                 <option value="hierarchical">Hierarchical</option>
@@ -1314,9 +1447,9 @@ def visualize_graph(bank: str):
             </select>
         </div>
         <div class="control-group">
-            <button onclick="fitNetwork()">Fit to Screen</button>
-            <button onclick="exportNetwork()">Export PNG</button>
-            <button onclick="refreshData()">Refresh</button>
+            <button onclick="fitNetwork()">🔍 Fit to Screen</button>
+            <button onclick="exportNetwork()">💾 Export PNG</button>
+            <button onclick="refreshData()">🔄 Refresh</button>
         </div>
     </div>
     
@@ -1379,11 +1512,180 @@ def visualize_graph(bank: str):
         let network;
         let nodes, edges;
         let allNodes, allEdges;
+        let currentBank = '{bank}';
+        let availableBanks = [];
         
-        // Initialize the network
-        async function initNetwork() {{
+        // Load available banks on page initialization
+        async function loadAvailableBanks() {{
             try {{
-                const response = await fetch('/banks/{bank}/graph-data');
+                const response = await fetch('/visualizations');
+                const data = await response.json();
+                availableBanks = data.available_visualizations;
+                
+                const bankSelect = document.getElementById('bankSelect');
+                bankSelect.innerHTML = '';
+                
+                availableBanks.forEach(bankInfo => {{
+                    const option = document.createElement('option');
+                    option.value = bankInfo.bank;
+                    
+                    // Create rich option text with bank statistics
+                    const stats = bankInfo.stats;
+                    const entityCount = stats.entities;
+                    const relationCount = stats.relationships;
+                    const obsCount = stats.observations;
+                    
+                    // Add emoji indicators for bank size
+                    let sizeIndicator = '📦'; // Small
+                    if (entityCount > 50 || relationCount > 50) {{
+                        sizeIndicator = '📋'; // Medium
+                    }}
+                    if (entityCount > 100 || relationCount > 100) {{
+                        sizeIndicator = '🗂️'; // Large
+                    }}
+                    if (entityCount > 200 || relationCount > 200) {{
+                        sizeIndicator = '🏢'; // Very Large
+                    }}
+                    
+                    option.textContent = `${{sizeIndicator}} ${{bankInfo.bank}} (${{entityCount}}E, ${{relationCount}}R, ${{obsCount}}O)`;
+                    
+                    if (bankInfo.bank === currentBank) {{
+                        option.selected = true;
+                    }}
+                    bankSelect.appendChild(option);
+                }});
+                
+                // Update page title with bank count
+                const totalBanks = availableBanks.length;
+                document.title = `Knowledge Graph Visualization - Bank: ${{currentBank}} (${{totalBanks}} banks available)`;
+                
+            }} catch (error) {{
+                console.error('Error loading available banks:', error);
+                document.getElementById('selectedInfo').innerHTML = `<p style="color: red;">Error loading banks: ${{error.message}}</p>`;
+            }}
+        }}
+        
+        // Switch to a different bank
+        async function switchToBank() {{
+            const bankSelect = document.getElementById('bankSelect');
+            const selectedBank = bankSelect.value;
+            
+            if (selectedBank === currentBank) {{
+                return; // No change needed
+            }}
+            
+            // Show enhanced loading state with bank info
+            const selectedBankInfo = availableBanks.find(b => b.bank === selectedBank);
+            const bankStats = selectedBankInfo ? selectedBankInfo.stats : {{ entities: '?', relationships: '?', observations: '?' }};
+            
+            document.getElementById('selectedInfo').innerHTML = `
+                <div style="padding: 12px; background: #e8f4fd; border-radius: 6px; border-left: 4px solid #4A90E2;">
+                    <p style="margin: 0; font-weight: bold; color: #2c3e50;">🔄 Switching to bank: ${{selectedBank}}</p>
+                    <p style="margin: 4px 0 0 0; font-size: 12px; color: #666;">
+                        Loading ${{bankStats.entities}} entities and ${{bankStats.relationships}} relationships...
+                    </p>
+                </div>
+            `;
+            
+            // Update current bank
+            currentBank = selectedBank;
+            
+            // Update page title and header with enhanced info
+            const totalBanks = availableBanks.length;
+            document.title = `Knowledge Graph Visualization - Bank: ${{selectedBank}} (${{totalBanks}} banks available)`;
+            document.querySelector('.header h2').innerHTML = `Memory Bank: <span style="color: #4A90E2;">${{selectedBank}}</span> <small style="color: #666;">(1 of ${{totalBanks}})</small>`;
+            
+            // Update browser URL without reload
+            const newUrl = `/banks/${{selectedBank}}/visualize`;
+            history.pushState({{bank: selectedBank}}, '', newUrl);
+            
+            // Preserve current interface state
+            const searchTerm = document.getElementById('searchInput').value;
+            const layoutType = document.getElementById('layoutSelect').value;
+            
+            // Load new bank data
+            await initNetwork(selectedBank);
+            
+            // Restore interface state
+            document.getElementById('searchInput').value = searchTerm;
+            document.getElementById('layoutSelect').value = layoutType;
+            
+            // Apply search if there was one
+            if (searchTerm) {{
+                searchNodes();
+            }}
+            
+            // Apply layout if not default
+            if (layoutType !== 'physics') {{
+                changeLayout();
+            }}
+        }}
+        
+        // Create a new memory bank
+        async function createNewBank() {{
+            const bankInput = document.getElementById('newBankInput');
+            const bankName = bankInput.value.trim();
+            
+            if (!bankName) {{
+                alert('Please enter a bank name');
+                return;
+            }}
+            
+            if (bankName === 'default') {{
+                alert('Cannot create a bank named "default" - please choose a different name');
+                return;
+            }}
+            
+            // Basic validation for bank name
+            if (!/^[a-zA-Z0-9_-]+$/.test(bankName)) {{
+                alert('Bank name can only contain letters, numbers, hyphens, and underscores');
+                return;
+            }}
+            
+            try {{
+                const response = await fetch('/banks/create', {{
+                    method: 'POST',
+                    headers: {{
+                        'Content-Type': 'application/json'
+                    }},
+                    body: JSON.stringify({{ bank: bankName }})
+                }});
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {{
+                    // Clear the input
+                    bankInput.value = '';
+                    
+                    // Refresh the bank list
+                    await loadAvailableBanks();
+                    
+                    // Switch to the new bank
+                    document.getElementById('bankSelect').value = bankName;
+                    await switchToBank();
+                    
+                    // Show success message
+                    document.getElementById('selectedInfo').innerHTML = `
+                        <div style="padding: 12px; background: #d4edda; border-radius: 6px; border-left: 4px solid #28a745;">
+                            <p style="margin: 0; font-weight: bold; color: #155724;">✅ Bank "${{bankName}}" created successfully!</p>
+                            <p style="margin: 4px 0 0 0; font-size: 12px; color: #666;">
+                                You can now add entities and relationships to this bank.
+                            </p>
+                        </div>
+                    `;
+                }} else {{
+                    alert(`Error creating bank: ${{result.message || 'Unknown error'}}`);
+                }}
+            }} catch (error) {{
+                console.error('Error creating bank:', error);
+                alert(`Error creating bank: ${{error.message}}`);
+            }}
+        }}
+        
+        // Initialize the network with optional bank parameter
+        async function initNetwork(bankName = currentBank) {{
+            try {{
+                const response = await fetch(`/banks/${{bankName}}/graph-data`);
                 const data = await response.json();
                 
                 if (data.error) {{
@@ -1421,6 +1723,10 @@ def visualize_graph(bank: str):
                     }}
                 }};
                 
+                // Create or update network
+                if (network) {{
+                    network.destroy();
+                }}
                 network = new vis.Network(container, graphData, options);
                 
                 // Event listeners
@@ -1467,6 +1773,85 @@ def visualize_graph(bank: str):
                 ${{stats.total_nodes}} entities, ${{stats.total_edges}} relationships, 
                 ${{stats.entity_types}} entity types, ${{stats.relationship_types}} relationship types
             `;
+        }}
+        
+        function clearSearch() {{
+            document.getElementById('searchInput').value = '';
+            searchNodes(); // This will reset all nodes to original style
+        }}
+        
+        function compareBanks() {{
+            // Create a comparison popup showing all banks
+            const popup = document.createElement('div');
+            popup.id = 'bankComparison';
+            popup.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: white;
+                border-radius: 12px;
+                padding: 24px;
+                box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+                z-index: 1000;
+                max-width: 600px;
+                max-height: 70vh;
+                overflow-y: auto;
+            `;
+            
+            let content = `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3 style="margin: 0; color: #2c3e50;">🏦 Memory Banks Comparison</h3>
+                    <button onclick="document.getElementById('bankComparison').remove()" 
+                            style="background: #E74C3C; color: white; border: none; border-radius: 50%; width: 30px; height: 30px; cursor: pointer;">✖</button>
+                </div>
+                <div style="display: grid; gap: 12px;">
+            `;
+            
+            availableBanks.forEach(bankInfo => {{
+                const isActive = bankInfo.bank === currentBank;
+                content += `
+                    <div style="border: 2px solid ${{isActive ? '#4A90E2' : '#ddd'}}; border-radius: 8px; padding: 12px; 
+                                background: ${{isActive ? '#e8f4fd' : 'white'}}; cursor: pointer;"
+                         onclick="selectBankFromComparison('${{bankInfo.bank}}')">
+                        <div style="font-weight: bold; color: ${{isActive ? '#4A90E2' : '#2c3e50'}}; margin-bottom: 4px;">
+                            ${{isActive ? '🎯 ' : ''}}${{bankInfo.bank}}
+                        </div>
+                        <div style="font-size: 12px; color: #666;">
+                            📊 ${{bankInfo.stats.entities}} entities • 🔗 ${{bankInfo.stats.relationships}} relationships • 📝 ${{bankInfo.stats.observations}} observations
+                        </div>
+                    </div>
+                `;
+            }});
+            
+            content += `</div>`;
+            popup.innerHTML = content;
+            
+            // Create backdrop
+            const backdrop = document.createElement('div');
+            backdrop.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.5);
+                z-index: 999;
+            `;
+            backdrop.onclick = () => {{
+                document.body.removeChild(backdrop);
+                document.body.removeChild(popup);
+            }};
+            
+            document.body.appendChild(backdrop);
+            document.body.appendChild(popup);
+        }}
+        
+        function selectBankFromComparison(bankName) {{
+            document.getElementById('bankComparison').remove();
+            document.querySelector('[style*="backdrop"]')?.remove();
+            document.getElementById('bankSelect').value = bankName;
+            switchToBank();
         }}
         
         function searchNodes() {{
@@ -1532,18 +1917,30 @@ def visualize_graph(bank: str):
             const canvas = document.querySelector('#mynetworkid canvas');
             if (canvas) {{
                 const link = document.createElement('a');
-                link.download = 'knowledge-graph-{bank}.png';
+                link.download = `knowledge-graph-${{currentBank}}.png`;
                 link.href = canvas.toDataURL();
                 link.click();
             }}
         }}
         
         function refreshData() {{
-            initNetwork();
+            initNetwork(currentBank);
         }}
         
         // Initialize when page loads
-        document.addEventListener('DOMContentLoaded', initNetwork);
+        document.addEventListener('DOMContentLoaded', async function() {{
+            await loadAvailableBanks();
+            await initNetwork();
+        }});
+        
+        // Handle browser back/forward buttons
+        window.addEventListener('popstate', function(event) {{
+            if (event.state && event.state.bank) {{
+                currentBank = event.state.bank;
+                document.getElementById('bankSelect').value = currentBank;
+                initNetwork(currentBank);
+            }}
+        }});
     </script>
 </body>
 </html>
@@ -1580,6 +1977,18 @@ def list_visualizations():
         "available_visualizations": visualizations,
         "total_banks": len(available_banks)
     }
+
+@app.get("/visualize")
+def visualize_all_banks():
+    """
+    Main visualization interface with bank selection.
+    Redirects to the default bank visualization with bank switching enabled.
+    """
+    # Default to first available bank or 'default'
+    default_bank = 'default' if 'default' in memory_banks else list(memory_banks.keys())[0] if memory_banks else 'default'
+    
+    # Render the enhanced visualization page
+    return visualize_graph(default_bank)
 
 @app.get("/")
 async def root(request: Request):
@@ -1623,35 +2032,51 @@ async def root(request: Request):
     # Regular JSON response
     return {"message": "Graph Memory MCP Server is running."}
 
-@app.post("/")
-async def root_post(request: Request):
+# Root POST handler temporarily disabled to fix hanging issue
+# @app.post("/")
+# async def disabled_root_post(request: Request):
+#     """Temporarily disabled to fix hanging issue"""
+#     return {"message": "Root POST temporarily disabled"}
     """
     Handle JSON-RPC 2.0 requests for MCP protocol.
     Accepts JSON-RPC initialize and other MCP method calls.
     """
     try:
-        # Get the request body
-        body = await request.body()
+        logger.info("Root POST handler called")
+        
+        # Get the request body with timeout
+        try:
+            body = await asyncio.wait_for(request.body(), timeout=2.0)
+        except asyncio.TimeoutError:
+            logger.error("Request body read timeout")
+            return {"message": "Graph Memory MCP Server is running."}
+        
+        logger.info(f"Request body length: {len(body) if body else 0}")
+        
         if not body:
             return {"message": "Graph Memory MCP Server is running."}
         
         # Parse JSON-RPC request
         try:
             rpc_request = json.loads(body)
-        except json.JSONDecodeError:
+            logger.info(f"Parsed JSON-RPC request: {rpc_request}")
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error: {e}")
             return {"message": "Graph Memory MCP Server is running."}
         
-        # Handle JSON-RPC 2.0 requests
-        if isinstance(rpc_request, dict) and rpc_request.get("jsonrpc") == "2.0":
-            method = rpc_request.get("method")
-            request_id = rpc_request.get("id")
-            params = rpc_request.get("params", {})
-            
-            logger.info(f"Handling JSON-RPC method: {method}")
-            
-            if method == "initialize":
-                # Return proper MCP initialize response
-                return {
+        # Quick return for non-MCP requests
+        if not isinstance(rpc_request, dict) or rpc_request.get("jsonrpc") != "2.0":
+            return {"message": "Graph Memory MCP Server is running."}
+        
+        method = rpc_request.get("method")
+        request_id = rpc_request.get("id")
+        params = rpc_request.get("params", {})
+        
+        logger.info(f"Handling JSON-RPC method: {method}")
+        
+        if method == "initialize":
+            # Return proper MCP initialize response
+            return {
                     "jsonrpc": "2.0",
                     "id": request_id,
                     "result": {
@@ -1680,9 +2105,9 @@ async def root_post(request: Request):
                         }
                     }
                 }
-            elif method == "tools/list":
-                # Return available tools
-                return {
+        elif method == "tools/list":
+            # Return available tools
+            return {
                     "jsonrpc": "2.0", 
                     "id": request_id,
                     "result": {
@@ -1845,9 +2270,9 @@ async def root_post(request: Request):
                         ]
                     }
                 }
-            else:
-                # Unknown method
-                return {
+        else:
+            # Unknown method
+            return {
                     "jsonrpc": "2.0",
                     "id": request_id,
                     "error": {
@@ -1894,6 +2319,7 @@ def initialize():
 # MCP stdio mode - for proper MCP protocol compliance
 async def handle_mcp_stdio():
     """Handle MCP communication over stdio"""
+    global current_bank
     logger.debug("Starting MCP stdio mode")
     
     while True:
@@ -2110,6 +2536,47 @@ async def handle_mcp_stdio():
                                         "names": {"type": "array", "items": {"type": "string"}, "description": "An array of entity names to retrieve"}
                                     },
                                     "required": ["names"]
+                                }
+                            },
+                            {
+                                "name": "create_bank",
+                                "description": "Create a new memory bank for organizing different topics/projects. CRITICAL: Always create specific banks for different projects - never use 'default' for real work.",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "bank": {"type": "string", "description": "Name of the memory bank to create (e.g., 'project-acme-auth', 'research-ai-optimization')"}
+                                    },
+                                    "required": ["bank"]
+                                }
+                            },
+                            {
+                                "name": "select_bank",
+                                "description": "Switch to a different memory bank. All subsequent operations will operate on the selected bank.",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "bank": {"type": "string", "description": "Name of the memory bank to switch to"}
+                                    },
+                                    "required": ["bank"]
+                                }
+                            },
+                            {
+                                "name": "list_banks",
+                                "description": "List all available memory banks with their statistics (entity count, relationship count, etc.)",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {}
+                                }
+                            },
+                            {
+                                "name": "delete_bank",
+                                "description": "Delete a memory bank and all its contents. Cannot delete the 'default' bank.",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "bank": {"type": "string", "description": "Name of the memory bank to delete"}
+                                    },
+                                    "required": ["bank"]
                                 }
                             }
                         ]
@@ -2622,6 +3089,157 @@ async def handle_mcp_stdio():
                             ]
                         }
                     }
+                
+                elif tool_name == "create_bank":
+                    bank_name = arguments.get("bank", "")
+                    if not bank_name:
+                        response = {
+                            "jsonrpc": "2.0",
+                            "id": request.get("id"),
+                            "error": {
+                                "code": -32602,
+                                "message": "Bank name is required"
+                            }
+                        }
+                    elif bank_name in memory_banks:
+                        response = {
+                            "jsonrpc": "2.0",
+                            "id": request.get("id"),
+                            "result": {
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": f"Bank '{bank_name}' already exists"
+                                    }
+                                ]
+                            }
+                        }
+                    else:
+                        memory_banks[bank_name] = {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}
+                        save_memory_banks()
+                        response = {
+                            "jsonrpc": "2.0",
+                            "id": request.get("id"),
+                            "result": {
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": f"Successfully created bank '{bank_name}'"
+                                    }
+                                ]
+                            }
+                        }
+                
+                elif tool_name == "select_bank":
+                    bank_name = arguments.get("bank", "")
+                    if not bank_name:
+                        response = {
+                            "jsonrpc": "2.0",
+                            "id": request.get("id"),
+                            "error": {
+                                "code": -32602,
+                                "message": "Bank name is required"
+                            }
+                        }
+                    elif bank_name not in memory_banks:
+                        response = {
+                            "jsonrpc": "2.0",
+                            "id": request.get("id"),
+                            "error": {
+                                "code": -32602,
+                                "message": f"Bank '{bank_name}' does not exist"
+                            }
+                        }
+                    else:
+                        current_bank = bank_name
+                        response = {
+                            "jsonrpc": "2.0",
+                            "id": request.get("id"),
+                            "result": {
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": f"Successfully switched to bank '{bank_name}'"
+                                    }
+                                ]
+                            }
+                        }
+                
+                elif tool_name == "list_banks":
+                    banks_info = []
+                    for bank_name, bank_data in memory_banks.items():
+                        bank_stats = {
+                            "bank": bank_name,
+                            "entities": len(bank_data["nodes"]),
+                            "relationships": len(bank_data["edges"]),
+                            "observations": len(bank_data["observations"]),
+                            "is_current": bank_name == current_bank
+                        }
+                        banks_info.append(bank_stats)
+                    
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Available banks ({len(banks_info)} total):\n" +
+                                           "\n".join([
+                                               f"{'• [CURRENT] ' if bank['is_current'] else '• '}{bank['bank']}: {bank['entities']} entities, {bank['relationships']} relationships, {bank['observations']} observations"
+                                               for bank in banks_info
+                                           ])
+                                }
+                            ]
+                        }
+                    }
+                
+                elif tool_name == "delete_bank":
+                    bank_name = arguments.get("bank", "")
+                    if not bank_name:
+                        response = {
+                            "jsonrpc": "2.0",
+                            "id": request.get("id"),
+                            "error": {
+                                "code": -32602,
+                                "message": "Bank name is required"
+                            }
+                        }
+                    elif bank_name == "default":
+                        response = {
+                            "jsonrpc": "2.0",
+                            "id": request.get("id"),
+                            "error": {
+                                "code": -32602,
+                                "message": "Cannot delete the default bank"
+                            }
+                        }
+                    elif bank_name not in memory_banks:
+                        response = {
+                            "jsonrpc": "2.0",
+                            "id": request.get("id"),
+                            "error": {
+                                "code": -32602,
+                                "message": f"Bank '{bank_name}' does not exist"
+                            }
+                        }
+                    else:
+                        del memory_banks[bank_name]
+                        if current_bank == bank_name:
+                            current_bank = "default"
+                        save_memory_banks()
+                        response = {
+                            "jsonrpc": "2.0",
+                            "id": request.get("id"),
+                            "result": {
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": f"Successfully deleted bank '{bank_name}'"
+                                    }
+                                ]
+                            }
+                        }
                 
                 else:
                     response = {
