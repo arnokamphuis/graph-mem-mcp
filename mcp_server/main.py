@@ -3617,6 +3617,20 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--mcp":
         # Run in MCP stdio mode
         asyncio.run(handle_mcp_stdio())
+    elif len(sys.argv) > 1 and sys.argv[1] == "--mcp-with-http":
+        # Run both MCP stdio and HTTP server
+        import uvicorn
+        import threading
+        
+        # Start HTTP server in background thread
+        def run_http_server():
+            uvicorn.run(app, host="0.0.0.0", port=10642)
+        
+        http_thread = threading.Thread(target=run_http_server, daemon=True)
+        http_thread.start()
+        
+        # Run MCP stdio in main thread
+        asyncio.run(handle_mcp_stdio())
     else:
         # Run as HTTP server (default)
         import uvicorn
