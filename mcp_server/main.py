@@ -9,6 +9,8 @@ import logging
 import os
 import re
 import sys
+import uuid
+from datetime import datetime
 from pathlib import Path
 
 # Set up logging
@@ -53,6 +55,9 @@ async def log_requests(request: Request, call_next):
     return response
 
 import re
+import uuid
+from datetime import datetime
+
 # Simple in-memory graph structure
 class Node(BaseModel):
     id: str
@@ -423,6 +428,219 @@ def ingest_context(payload: TextIngest = Body(...)):
     return {"status": "success", "entities": list(entities), "edges_added": len(memory_banks[b]["edges"]), "bank": b}
 
 
+class KnowledgeIngest(BaseModel):
+    text: str
+    bank: str = "default"
+    source: str = "text_input"
+    extract_entities: bool = True
+    extract_relationships: bool = True
+    create_observations: bool = True
+
+def extract_advanced_entities(text: str):
+    """Enhanced entity extraction with multiple patterns and types"""
+    entities = {}
+    
+    # 1. Named entities (capitalized sequences)
+    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
+    for entity in named_entities:
+        if len(entity) > 2:  # Filter out short words
+            entities[entity] = {"type": "named_entity", "confidence": 0.8}
+    
+    # 2. Technical terms (words with specific patterns)
+    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
+    for term in technical_terms:
+        entities[term] = {"type": "technical_term", "confidence": 0.7}
+    
+    # 3. Quoted concepts
+    quoted_concepts = re.findall(r'"([^"]*)"', text)
+    for concept in quoted_concepts:
+        if len(concept.strip()) > 2:
+            entities[concept] = {"type": "concept", "confidence": 0.9}
+    
+    # 4. Email addresses and URLs
+    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+    for email in emails:
+        entities[email] = {"type": "email", "confidence": 1.0}
+    
+    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
+    for url in urls:
+        entities[url] = {"type": "url", "confidence": 1.0}
+    
+    # 5. Numbers and measurements
+    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
+    for measurement in measurements:
+        entities[measurement] = {"type": "measurement", "confidence": 0.8}
+    
+    # 6. Dates
+    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
+    for date in dates:
+        entities[date] = {"type": "date", "confidence": 0.9}
+    
+    return entities
+
+def extract_relationships(text: str, entities: dict):
+    """Extract relationships between entities with context"""
+    relationships = []
+    
+    # Split text into sentences for relationship extraction
+    sentences = re.split(r'[.!?]+', text)
+    
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if len(sentence) < 10:  # Skip very short sentences
+            continue
+            
+        # Find entities in this sentence
+        sentence_entities = []
+        for entity in entities.keys():
+            if entity.lower() in sentence.lower():
+                sentence_entities.append(entity)
+        
+        # Extract relationships between entities in the same sentence
+        for i, entity1 in enumerate(sentence_entities):
+            for entity2 in sentence_entities[i+1:]:
+                # Look for action words between entities
+                pattern = rf'\b{re.escape(entity1.lower())}.*?\b(\w+(?:s|ed|ing)?)\b.*?{re.escape(entity2.lower())}'
+                matches = re.findall(pattern, sentence.lower())
+                
+                if matches:
+                    for action in matches:
+                        if len(action) > 2:  # Filter short words
+                            relationships.append({
+                                "from": entity1,
+                                "to": entity2,
+                                "type": action,
+                                "context": sentence[:100] + "..." if len(sentence) > 100 else sentence,
+                                "confidence": 0.6
+                            })
+                else:
+                    # Default relationship for co-occurrence
+                    relationships.append({
+                        "from": entity1,
+                        "to": entity2,
+                        "type": "related_to",
+                        "context": sentence[:100] + "..." if len(sentence) > 100 else sentence,
+                        "confidence": 0.4
+                    })
+    
+    return relationships
+
+@app.post("/knowledge/ingest")
+def ingest_knowledge_graph(payload: KnowledgeIngest = Body(...)):
+    """
+    Advanced knowledge graph creation from large text with sophisticated entity and relationship extraction.
+    
+    Request body: {
+        "text": "Large text content...",
+        "bank": "bank_name",
+        "source": "document_name",
+        "extract_entities": true,
+        "extract_relationships": true,
+        "create_observations": true
+    }
+    
+    Response: {
+        "status": "success",
+        "entities_created": 15,
+        "relationships_created": 8,
+        "observations_created": 23,
+        "processing_stats": {...},
+        "bank": "bank_name"
+    }
+    """
+    text = payload.text
+    b = payload.bank or current_bank
+    source = payload.source
+    
+    processing_stats = {
+        "text_length": len(text),
+        "sentences": len(re.split(r'[.!?]+', text)),
+        "words": len(text.split()),
+        "processing_time": datetime.now().isoformat()
+    }
+    
+    entities_created = 0
+    relationships_created = 0
+    observations_created = 0
+    
+    # Extract entities with advanced patterns
+    if payload.extract_entities:
+        entities = extract_advanced_entities(text)
+        
+        for entity_name, entity_info in entities.items():
+            entity_id = entity_name.replace(" ", "_").lower()
+            
+            # Create or update entity
+            if entity_id not in memory_banks[b]["nodes"]:
+                node = Node(
+                    id=entity_id,
+                    data={
+                        "name": entity_name,
+                        "type": entity_info["type"],
+                        "confidence": entity_info["confidence"],
+                        "source": source,
+                        "extracted_from": "text_analysis",
+                        "created_at": datetime.now().isoformat()
+                    }
+                )
+                memory_banks[b]["nodes"][entity_id] = node
+                entities_created += 1
+            
+            # Create observation with source text context
+            if payload.create_observations:
+                # Find context around the entity in the text
+                pattern = rf'(.{{0,50}}\b{re.escape(entity_name)}\b.{{0,50}})'
+                contexts = re.findall(pattern, text, re.IGNORECASE)
+                
+                for context in contexts[:3]:  # Limit to 3 contexts per entity
+                    obs = Observation(
+                        id=str(uuid.uuid4()),
+                        entity_id=entity_id,
+                        content=f"Found in context: \"{context.strip()}\"",
+                        timestamp=datetime.now().isoformat()
+                    )
+                    memory_banks[b]["observations"].append(obs)
+                    observations_created += 1
+        
+        # Extract relationships
+        if payload.extract_relationships and entities:
+            relationships = extract_relationships(text, entities)
+            
+            for rel in relationships:
+                from_id = rel["from"].replace(" ", "_").lower()
+                to_id = rel["to"].replace(" ", "_").lower()
+                
+                # Only create relationship if both entities exist
+                if from_id in memory_banks[b]["nodes"] and to_id in memory_banks[b]["nodes"]:
+                    edge = Edge(
+                        source=from_id,
+                        target=to_id,
+                        data={
+                            "type": rel["type"],
+                            "context": rel["context"],
+                            "confidence": rel["confidence"],
+                            "source": source,
+                            "extracted_from": "text_analysis",
+                            "created_at": datetime.now().isoformat()
+                        }
+                    )
+                    edge.id = f"{from_id}-{rel['type']}-{to_id}-{len(memory_banks[b]['edges'])}"
+                    memory_banks[b]["edges"].append(edge)
+                    relationships_created += 1
+    
+    # Save all changes
+    save_memory_banks()
+    
+    return {
+        "status": "success",
+        "entities_created": entities_created,
+        "relationships_created": relationships_created,
+        "observations_created": observations_created,
+        "processing_stats": processing_stats,
+        "bank": b
+    }
+
+
 @app.get("/context/retrieve")
 def retrieve_context(bank: str = Query(None)):
     """
@@ -619,6 +837,22 @@ async def root_post(request: Request):
                                         }
                                     }
                                 }
+                            },
+                            {
+                                "name": "ingest_knowledge",
+                                "description": "Create a knowledge graph from large text with advanced entity and relationship extraction",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "text": {"type": "string", "description": "Large text content to analyze"},
+                                        "bank": {"type": "string", "description": "Memory bank name"},
+                                        "source": {"type": "string", "description": "Source identifier"},
+                                        "extract_entities": {"type": "boolean", "description": "Extract entities"},
+                                        "extract_relationships": {"type": "boolean", "description": "Extract relationships"},
+                                        "create_observations": {"type": "boolean", "description": "Create observations"}
+                                    },
+                                    "required": ["text"]
+                                }
                             }
                         ]
                     }
@@ -785,6 +1019,22 @@ async def handle_mcp_stdio():
                                         }
                                     }
                                 }
+                            },
+                            {
+                                "name": "ingest_knowledge",
+                                "description": "Create a knowledge graph from large text with advanced entity and relationship extraction",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "text": {"type": "string", "description": "Large text content to analyze"},
+                                        "bank": {"type": "string", "description": "Memory bank name"},
+                                        "source": {"type": "string", "description": "Source identifier"},
+                                        "extract_entities": {"type": "boolean", "description": "Extract entities"},
+                                        "extract_relationships": {"type": "boolean", "description": "Extract relationships"},
+                                        "create_observations": {"type": "boolean", "description": "Create observations"}
+                                    },
+                                    "required": ["text"]
+                                }
                             }
                         ]
                     }
@@ -899,6 +1149,94 @@ async def handle_mcp_stdio():
                                 {
                                     "type": "text",
                                     "text": f"Added reasoning step: {step.description}"
+                                }
+                            ]
+                        }
+                    }
+                    
+                elif tool_name == "ingest_knowledge":
+                    # Create KnowledgeIngest object from arguments
+                    text = arguments.get("text", "")
+                    bank = arguments.get("bank", current_bank)
+                    source = arguments.get("source", "text_input")
+                    extract_entities = arguments.get("extract_entities", True)
+                    extract_relationships = arguments.get("extract_relationships", True)
+                    create_observations = arguments.get("create_observations", True)
+                    
+                    # Process the knowledge ingestion
+                    entities_created = 0
+                    relationships_created = 0
+                    observations_created = 0
+                    
+                    if extract_entities:
+                        extracted_entities = extract_advanced_entities(text)
+                        
+                        for entity_name, entity_info in extracted_entities.items():
+                            entity_id = entity_name.replace(" ", "_").lower()
+                            
+                            if entity_id not in memory_banks[bank]["nodes"]:
+                                node = Node(
+                                    id=entity_id,
+                                    data={
+                                        "name": entity_name,
+                                        "type": entity_info["type"],
+                                        "confidence": entity_info["confidence"],
+                                        "source": source,
+                                        "extracted_from": "text_analysis",
+                                        "created_at": datetime.now().isoformat()
+                                    }
+                                )
+                                memory_banks[bank]["nodes"][entity_id] = node
+                                entities_created += 1
+                            
+                            if create_observations:
+                                pattern = rf'(.{{0,50}}\b{re.escape(entity_name)}\b.{{0,50}})'
+                                contexts = re.findall(pattern, text, re.IGNORECASE)
+                                
+                                for context in contexts[:2]:  # Limit to 2 contexts per entity
+                                    obs = Observation(
+                                        id=str(uuid.uuid4()),
+                                        entity_id=entity_id,
+                                        content=f"Found in context: \"{context.strip()}\"",
+                                        timestamp=datetime.now().isoformat()
+                                    )
+                                    memory_banks[bank]["observations"].append(obs)
+                                    observations_created += 1
+                        
+                        if extract_relationships and extracted_entities:
+                            relationships = extract_relationships(text, extracted_entities)
+                            
+                            for rel in relationships:
+                                from_id = rel["from"].replace(" ", "_").lower()
+                                to_id = rel["to"].replace(" ", "_").lower()
+                                
+                                if from_id in memory_banks[bank]["nodes"] and to_id in memory_banks[bank]["nodes"]:
+                                    edge = Edge(
+                                        source=from_id,
+                                        target=to_id,
+                                        data={
+                                            "type": rel["type"],
+                                            "context": rel["context"],
+                                            "confidence": rel["confidence"],
+                                            "source": source,
+                                            "extracted_from": "text_analysis",
+                                            "created_at": datetime.now().isoformat()
+                                        }
+                                    )
+                                    edge.id = f"{from_id}-{rel['type']}-{to_id}-{len(memory_banks[bank]['edges'])}"
+                                    memory_banks[bank]["edges"].append(edge)
+                                    relationships_created += 1
+                    
+                    save_memory_banks()
+                    
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Knowledge graph created: {entities_created} entities, {relationships_created} relationships, {observations_created} observations from {len(text.split())} words of text"
                                 }
                             ]
                         }

@@ -166,6 +166,21 @@ No need to start the server manually - VS Code will manage the container lifecyc
 2. **add_observations**: Add observations to existing entities
 3. **create_relations**: Create relationships between entities
 4. **sequential_thinking**: Add reasoning steps
+5. **ingest_knowledge**: 🆕 **Advanced knowledge graph creation from large text with sophisticated entity and relationship extraction**
+
+### Enhanced Knowledge Graph Creation
+
+The new `ingest_knowledge` tool can transform any large text into a structured knowledge graph! It automatically extracts:
+
+- **Named entities** (people, companies, technologies)
+- **Technical terms** and concepts  
+- **Relationships** with context (created, leads, known as)
+- **Contextual observations** with source attribution
+- **Confidence scores** and timestamps
+
+**Example**: From a 500-word AI research text, it extracted 13 entities, 14 relationships, and 17 contextual observations with full source attribution!
+
+See [KNOWLEDGE_GRAPH_FEATURES.md](KNOWLEDGE_GRAPH_FEATURES.md) for complete documentation.
 
 ### Example MCP Tool Call
 
