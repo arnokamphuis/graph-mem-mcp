@@ -1,12 +1,30 @@
 # VS Code Setup Guide
 
-Complete guide for configuring the Graph Memory MCP Server with VS Code Agent Chat.
+Complete guide for configuring the Graph Memory MCP Server with VS Code Agent Chat and AI agents.
 
 ## Prerequisites
 
 - VS Code with Agent Chat enabled
 - Graph Memory MCP Server container built (see [Deployment Guide](./DEPLOYMENT.md))
-- Basic understanding of MCP configuration
+- Basic understanding of MCP configuration and memory bank organization
+
+## 🏦 **CRITICAL: AI Agent Bank Organization**
+
+**⚠️ Before configuring VS Code, understand that AI agents MUST use project-specific memory banks:**
+
+### 🎯 Mandatory AI Agent Workflow
+1. **Create project-specific bank** before any knowledge operations
+2. **Never use 'default' bank** for project work
+3. **Name banks descriptively**: `project-{client}-{component}`, `feature-{name}`, `research-{topic}`
+4. **One project = One bank** - never mix different projects
+
+### 📝 Example Bank Names
+```
+project-acme-ecommerce-backend    ← Acme e-commerce backend work
+feature-user-authentication       ← User auth feature development  
+research-ai-performance-q1-2025   ← AI performance research
+bugfix-1234-payment-issue         ← Specific bug fix work
+```
 
 ## Configuration Steps
 
@@ -160,11 +178,28 @@ Test each available tool:
 @mcp-server-graph-memory Add reasoning step: "Analyzing project structure for optimal organization"
 ```
 
+### 2. Test Enhanced Features
+
+**Test Intelligent Knowledge Extraction:**
+```
+Create a project for client Acme's e-commerce platform. The team includes Sarah Johnson (Lead Developer) and Marcus Chen (DevOps Engineer). They're working on integrating Stripe payment gateway with a budget of $50,000 for Q2 2025 deliverables.
+```
+
+**Expected Auto-Extraction:**
+- Entities: "client Acme", "Sarah Johnson", "Marcus Chen", "Stripe payment gateway", "$50,000", "Q2 2025"
+- Relationships: "Sarah Johnson role Lead Developer", "Marcus Chen role DevOps Engineer", etc.
+
+**Test Bank Organization:**
+```
+@graph-memory Create a new bank called "project-acme-ecommerce" and switch to it before creating any entities
+```
+
 ### 3. Verify Persistence
 
-1. Create some test data using Agent Chat
-2. Restart the MCP server container
-3. Verify data persists by querying the entities
+1. Create test data using proper bank organization
+2. Restart the MCP server container  
+3. Verify data persists in the correct banks
+4. Test that auto-extracted entities and relationships are preserved
 
 ## Troubleshooting
 

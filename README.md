@@ -7,35 +7,54 @@ A Model Context Protocol (MCP) compliant server that provides persistent graph-b
 - **MCP Protocol Compliance**: Full JSON-RPC 2.0 support for VS Code Agent Chat integration
 - **Persistent Storage**: File-based persistence using JSON with automatic save/load
 - **Multi-Bank Architecture**: Support for multiple isolated memory banks
+- **🧠 Intelligent Knowledge Extraction**: **NEW!** Auto-extraction of entities and relationships from observation text
 - **Graph Operations**: Complete CRUD operations for entities, relationships, and observations
 - **Sequential Thinking**: Support for reasoning step storage and retrieval
 - **Advanced Knowledge Graph Creation**: Sophisticated entity extraction from large text with confidence scoring
-- **Fuzzy Matching & Typo Handling**: **NEW!** Intelligent search and entity deduplication with typo tolerance
+- **Fuzzy Matching & Typo Handling**: Intelligent search and entity deduplication with typo tolerance
 - **Interactive Visualization**: Beautiful web-based graph visualization using vis.js Network library
 - **Smart Entity Detection**: Multiple entity types (named_entity, technical_term, concept, email, url, measurement, date)
 - **Intelligent Relationship Analysis**: Context-aware relationship detection with confidence scoring
 - **Container Deployment**: Docker/Podman containerization with volume mounting
 - **RESTful API**: Full REST endpoints alongside MCP protocol
 
-## 🏦 **CRITICAL: Memory Bank Organization for AI Agents**
+## 🏦 **CRITICAL: Project-Based Memory Bank Organization for AI Agents**
 
-**⚠️ AI agents MUST use separate memory banks to organize different topics, projects, or contexts.**
+**⚠️ AI agents MUST create and use project-specific memory banks for ALL knowledge operations.**
 
-This server supports **multi-bank architecture** - think of banks as separate databases for different purposes:
+### 🎯 Bank Organization Rules
 
-- **✅ Use separate banks for**: Different projects, users, topics, or domains
-- **❌ Never mix**: Unrelated topics in the same bank
-- **📝 Naming**: Use descriptive names like `"client-acme-ecommerce"` or `"python-ml-research"`
+**MANDATORY for AI Agents:**
+1. **Create a dedicated bank** for each project/task before any entity operations
+2. **Never use the 'default' bank** for real project work
+3. **Name banks descriptively** using project context
+4. **All entities and observations** for a project must go in that project's bank
+
+**Bank Naming Convention:**
+```
+project-{client/org}-{component}     ← For client work
+feature-{name}-{context}             ← For feature development  
+research-{topic}-{timeframe}         ← For research projects
+bugfix-{issue-id}-{component}        ← For bug fixes
+```
 
 **Example Organization:**
 ```
-📁 client-acme-ecommerce    ← E-commerce project knowledge
-📁 client-techco-api        ← API development project  
-📁 research-ai-trends       ← AI research knowledge
-📁 user-alice-personal      ← Alice's personal projects
+📁 project-acme-ecommerce-backend    ← All Acme e-commerce backend knowledge
+📁 project-acme-ecommerce-frontend   ← All Acme e-commerce frontend knowledge
+📁 feature-user-authentication       ← Authentication feature development
+📁 research-ai-performance-q1-2025   ← Q1 2025 AI performance research
+📁 bugfix-1234-payment-gateway       ← Payment gateway bug fix
 ```
 
-**See [MCP Integration Guide](docs/MCP_INTEGRATION.md#-important-memory-bank-organization-for-ai-agents) for complete bank organization guidelines.**
+### 🔄 Workflow for AI Agents
+```markdown
+1. Identify the project/task context
+2. Create project-specific bank: `create_bank {"name": "project-acme-auth"}`
+3. Select the bank: `select_bank {"name": "project-acme-auth"}`
+4. ALL subsequent operations use this bank automatically
+5. Never mix different projects in the same bank
+```
 
 ## 🚀 Quick Start
 
@@ -326,15 +345,53 @@ No need to start the server manually - VS Code will manage the container lifecyc
 
 ### MCP Tools Available
 
-1. **create_entities**: Create multiple entities with observations
-2. **add_observations**: Add observations to existing entities
+1. **create_entities**: 🧠 **Enhanced!** Create multiple entities with automatic knowledge extraction from observations
+2. **add_observations**: 🧠 **Enhanced!** Add observations to existing entities with automatic knowledge extraction
 3. **create_relations**: Create relationships between entities
 4. **sequential_thinking**: Add reasoning steps
-5. **ingest_knowledge**: 🆕 **Advanced knowledge graph creation from large text with sophisticated entity and relationship extraction**
-6. **search_nodes**: 🆕 **Search entities by name, type, or observations content with relevance scoring**
-7. **search_relations**: 🆕 **Search relationships by type, context, or entity names with filtering**
-8. **search_observations**: 🆕 **Search observations by content or entity with advanced matching**
-9. **search_all**: 🆕 **Comprehensive search across all entities, relationships, and observations**
+5. **ingest_knowledge**: **Advanced knowledge graph creation from large text with sophisticated entity and relationship extraction**
+6. **search_nodes**: **Search entities by name, type, or observations content with relevance scoring**
+7. **search_relations**: **Search relationships by type, context, or entity names with filtering**
+8. **search_observations**: **Search observations by content or entity with advanced matching**
+9. **search_all**: **Comprehensive search across all entities, relationships, and observations**
+
+## 🧠 **NEW: Intelligent Knowledge Extraction**
+
+**Both `create_entities` and `add_observations` now automatically extract valuable knowledge from observation text!**
+
+### ✨ Auto-Extraction Features
+- **🔍 Smart Entity Detection**: Automatically finds people, organizations, technical terms, dates, measurements, emails, URLs
+- **🔗 Relationship Discovery**: Identifies connections and relationships between entities mentioned in text
+- **🎯 Confidence Scoring**: Each extracted entity and relationship includes confidence scores
+- **🏷️ Type Classification**: Automatically categorizes entities by type (named_entity, technical_term, concept, etc.)
+- **🔄 Intelligent Connections**: Creates meaningful relationships between existing and newly discovered entities
+
+### 🎛️ Control Parameters
+Both tools support the `auto_extract` parameter:
+- **`auto_extract: true`** (default): Enable intelligent knowledge extraction
+- **`auto_extract: false`**: Simple storage without extraction
+
+### 📝 Example: Rich Knowledge Extraction
+
+**Input:**
+```json
+{
+  "entities": [{
+    "name": "ai-research-project",
+    "entityType": "project", 
+    "observations": [
+      "Collaboration between OpenAI and Microsoft on GPT-4 integration",
+      "Team includes Sarah Johnson, Dr. Marcus Chen working on transformer architecture",
+      "Budget: $2.5 million for Q1 2025 deliverables"
+    ]
+  }]
+}
+```
+
+**Auto-Extracted:**
+- **Entities**: "OpenAI", "Microsoft", "GPT-4", "Sarah Johnson", "Dr. Marcus Chen", "transformer architecture", "$2.5 million", "Q1 2025"
+- **Relationships**: "OpenAI collaborates_with Microsoft", "Sarah Johnson works_on transformer architecture", etc.
+- **All connected** to the main "ai-research-project" entity
 
 ## 🔍 **NEW: Comprehensive Search Capabilities**
 

@@ -119,9 +119,9 @@ def serialize_memory_banks():
             
             serialized[bank_name] = {
                 "nodes": nodes_dict,
-                "edges": [edge.dict() for edge in bank_data["edges"]],
-                "observations": [obs.dict() for obs in bank_data["observations"]],
-                "reasoning_steps": [step.dict() for step in bank_data["reasoning_steps"]]
+                "edges": [edge.model_dump() for edge in bank_data["edges"]],
+                "observations": [obs.model_dump() for obs in bank_data["observations"]],
+                "reasoning_steps": [step.model_dump() for step in bank_data["reasoning_steps"]]
             }
         except Exception as e:
             logger.error(f"Error serializing bank {bank_name}: {e}")
@@ -147,16 +147,42 @@ def save_memory_banks():
         serialized_data = serialize_memory_banks()
         
         # Ensure DATA_DIR exists and is writable
-        DATA_DIR.mkdir(exist_ok=True)
+        try:
+            DATA_DIR.mkdir(exist_ok=True)
+        except PermissionError as e:
+            logger.error(f"Cannot create data directory {DATA_DIR}: {e}")
+            return
+        
+        # Check if directory is writable
+        if not os.access(DATA_DIR, os.W_OK):
+            logger.error(f"Data directory {DATA_DIR} is not writable")
+            return
         
         # Write to temp file first, then rename for atomic operation
         temp_file = MEMORY_FILE.with_suffix('.tmp')
-        with open(temp_file, 'w') as f:
-            json.dump(serialized_data, f, indent=2)
-        
-        # Atomic rename
-        temp_file.rename(MEMORY_FILE)
-        logger.info(f"Memory banks saved to {MEMORY_FILE}")
+        try:
+            with open(temp_file, 'w') as f:
+                json.dump(serialized_data, f, indent=2)
+            
+            # Atomic rename
+            temp_file.rename(MEMORY_FILE)
+            logger.info(f"Memory banks saved to {MEMORY_FILE}")
+        except PermissionError as e:
+            logger.error(f"Permission denied writing to {temp_file}: {e}")
+            # Try to cleanup temp file if it exists
+            if temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except:
+                    pass
+        except Exception as e:
+            logger.error(f"Error writing memory banks file: {e}")
+            # Try to cleanup temp file if it exists
+            if temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except:
+                    pass
     except Exception as e:
         logger.error(f"Failed to save memory banks: {e}")
         # Continue execution even if save fails - data persists in memory
@@ -2437,7 +2463,7 @@ async def root(request: Request):
                         "tools": [
                             {
                                 "name": "create_entities",
-                                "description": "Create multiple new entities in the knowledge graph",
+                                "description": "Create multiple new entities in the knowledge graph with intelligent auto-extraction of additional entities and relationships from observations. **CRITICAL: AI agents MUST create and use project-specific memory banks. Never use 'default' bank for project work. Create bank with descriptive name (e.g., 'project-acme-auth', 'feature-user-dashboard') before creating entities. All project knowledge must go in the project's dedicated bank.**",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {
@@ -2451,6 +2477,11 @@ async def root(request: Request):
                                                     "observations": {"type": "array", "items": {"type": "string"}}
                                                 }
                                             }
+                                        },
+                                        "auto_extract": {
+                                            "type": "boolean", 
+                                            "description": "Whether to automatically extract additional entities and relationships from observation text (default: true)",
+                                            "default": True
                                         }
                                     }
                                 }
@@ -2682,7 +2713,7 @@ async def handle_mcp_stdio():
                         "tools": [
                             {
                                 "name": "create_entities",
-                                "description": "Create multiple new entities in the knowledge graph. IMPORTANT: Use separate memory banks for different topics/projects (e.g., 'client-acme-project', 'personal-research'). Create banks using POST /banks/create and switch using POST /banks/select before creating entities. Never mix unrelated topics in the same bank.",
+                                "description": "Create multiple new entities in the knowledge graph with optional auto-extraction of additional entities and relationships from observations. IMPORTANT: Use separate memory banks for different topics/projects (e.g., 'client-acme-project', 'personal-research'). Create banks using POST /banks/create and switch using POST /banks/select before creating entities. Never mix unrelated topics in the same bank.",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {
@@ -2696,6 +2727,11 @@ async def handle_mcp_stdio():
                                                     "observations": {"type": "array", "items": {"type": "string"}}
                                                 }
                                             }
+                                        },
+                                        "auto_extract": {
+                                            "type": "boolean", 
+                                            "description": "Whether to automatically extract additional entities and relationships from observation text (default: true)",
+                                            "default": True
                                         }
                                     }
                                 }
@@ -2923,18 +2959,95 @@ async def handle_mcp_stdio():
                 
                 if tool_name == "create_entities":
                     entities = arguments.get("entities", [])
+                    auto_extract = arguments.get("auto_extract", True)  # Default to True for smart extraction
                     created_entities = []
-                    for entity_data in entities:
-                        node = Node(
-                            id=entity_data["name"],
-                            data={
-                                "type": entity_data["entityType"],
-                                "observations": entity_data.get("observations", [])
-                            }
-                        )
-                        memory_banks[current_bank]["nodes"][node.id] = node
-                        created_entities.append(node.model_dump())
-                    save_memory_banks()
+                    observations_added = 0
+                    extracted_entities = {}
+                    extracted_relationships = []
+                    extracted_count = 0
+                    
+                    try:
+                        # First pass: Create the explicitly specified entities
+                        for entity_data in entities:
+                            node = Node(
+                                id=entity_data["name"],
+                                data={
+                                    "type": entity_data["entityType"]
+                                }
+                            )
+                            memory_banks[current_bank]["nodes"][node.id] = node
+                            created_entities.append(node.model_dump())
+                            
+                            # Add observations separately to the observations collection
+                            observations = entity_data.get("observations", [])
+                            all_observation_text = " ".join(observations)
+                            
+                            for obs_content in observations:
+                                obs = Observation(
+                                    id=f"obs-{len(memory_banks[current_bank]['observations'])}",
+                                    entity_id=entity_data["name"],
+                                    content=obs_content,
+                                    timestamp=str(time.time())
+                                )
+                                memory_banks[current_bank]["observations"].append(obs)
+                                observations_added += 1
+                            
+                            # Extract additional entities and relationships from observations
+                            if auto_extract and all_observation_text.strip():
+                                try:
+                                    # Extract entities from observation text
+                                    obs_entities = extract_advanced_entities(all_observation_text)
+                                    for entity_name, entity_info in obs_entities.items():
+                                        if entity_name not in memory_banks[current_bank]["nodes"] and entity_name != entity_data["name"]:
+                                            extracted_entities[entity_name] = entity_info
+                                    
+                                    # Extract relationships involving this entity
+                                    all_entities = {entity_data["name"]: {"type": entity_data["entityType"], "confidence": 1.0}}
+                                    all_entities.update(obs_entities)
+                                    obs_relationships = extract_relationships(all_observation_text, all_entities)
+                                    extracted_relationships.extend(obs_relationships)
+                                except Exception as e:
+                                    logger.error(f"Error during auto-extraction: {e}")
+                        
+                        # Second pass: Create extracted entities
+                        if auto_extract:
+                            for entity_name, entity_info in extracted_entities.items():
+                                node = Node(
+                                    id=entity_name,
+                                    data={
+                                        "type": entity_info["type"],
+                                        "confidence": entity_info["confidence"],
+                                        "auto_extracted": True
+                                    }
+                                )
+                                memory_banks[current_bank]["nodes"][node.id] = node
+                                extracted_count += 1
+                            
+                            # Create extracted relationships
+                            for rel in extracted_relationships:
+                                if (rel["from"] in memory_banks[current_bank]["nodes"] and 
+                                    rel["to"] in memory_banks[current_bank]["nodes"]):
+                                    edge = Edge(
+                                        source=rel["from"],
+                                        target=rel["to"],
+                                        data={
+                                            "type": rel["type"],
+                                            "confidence": rel.get("confidence", 0.7),
+                                            "auto_extracted": True
+                                        }
+                                    )
+                                    edge.id = f"{edge.source}-{edge.target}-{len(memory_banks[current_bank]['edges'])}"
+                                    memory_banks[current_bank]["edges"].append(edge)
+                        
+                        save_memory_banks()
+                        
+                        result_text = f"Created {len(created_entities)} entities: {[e['id'] for e in created_entities]}"
+                        if auto_extract and extracted_count > 0:
+                            result_text += f"\nAuto-extracted {extracted_count} additional entities and {len(extracted_relationships)} relationships from observations"
+                        
+                    except Exception as e:
+                        logger.error(f"Error in create_entities: {e}")
+                        result_text = f"Created {len(created_entities)} entities (with errors during auto-extraction)"
                     
                     response = {
                         "jsonrpc": "2.0",
@@ -2943,7 +3056,7 @@ async def handle_mcp_stdio():
                             "content": [
                                 {
                                     "type": "text",
-                                    "text": f"Created {len(created_entities)} entities: {[e['id'] for e in created_entities]}"
+                                    "text": result_text
                                 }
                             ]
                         }
@@ -2951,21 +3064,96 @@ async def handle_mcp_stdio():
                     
                 elif tool_name == "add_observations":
                     observations = arguments.get("observations", [])
+                    auto_extract = arguments.get("auto_extract", True)  # Default to True for smart extraction
                     added_count = 0
-                    for obs_data in observations:
-                        entity_name = obs_data["entityName"]
-                        contents = obs_data.get("contents", [])
-                        if entity_name in memory_banks[current_bank]["nodes"]:
-                            for content in contents:
-                                obs = Observation(
-                                    id=f"obs-{len(memory_banks[current_bank]['observations'])}",
-                                    entity_id=entity_name,
-                                    content=content,
-                                    timestamp=str(time.time())
-                                )
-                                memory_banks[current_bank]["observations"].append(obs)
-                                added_count += 1
-                    save_memory_banks()
+                    extracted_entities = {}
+                    extracted_relationships = []
+                    all_observation_texts = []
+                    extracted_count = 0
+                    
+                    try:
+                        # First pass: Add observations and collect text for extraction
+                        for obs_data in observations:
+                            entity_name = obs_data["entityName"]
+                            contents = obs_data.get("contents", [])
+                            if entity_name in memory_banks[current_bank]["nodes"]:
+                                for content in contents:
+                                    obs = Observation(
+                                        id=f"obs-{len(memory_banks[current_bank]['observations'])}",
+                                        entity_id=entity_name,
+                                        content=content,
+                                        timestamp=str(time.time())
+                                    )
+                                    memory_banks[current_bank]["observations"].append(obs)
+                                    added_count += 1
+                                    
+                                    # Collect text for knowledge extraction
+                                    if auto_extract:
+                                        all_observation_texts.append(content)
+                        
+                        # Second pass: Extract knowledge from all observation text
+                        if auto_extract and all_observation_texts:
+                            try:
+                                combined_text = " ".join(all_observation_texts)
+                                
+                                # Extract entities from observation text
+                                obs_entities = extract_advanced_entities(combined_text)
+                                for entity_name, entity_info in obs_entities.items():
+                                    if entity_name not in memory_banks[current_bank]["nodes"]:
+                                        extracted_entities[entity_name] = entity_info
+                                
+                                # Create extracted entities
+                                for entity_name, entity_info in extracted_entities.items():
+                                    node = Node(
+                                        id=entity_name,
+                                        data={
+                                            "type": entity_info["type"],
+                                            "confidence": entity_info["confidence"],
+                                            "auto_extracted": True
+                                        }
+                                    )
+                                    memory_banks[current_bank]["nodes"][node.id] = node
+                                    extracted_count += 1
+                                
+                                # Extract relationships involving all entities (existing + extracted)
+                                all_entities = {}
+                                for entity_id in memory_banks[current_bank]["nodes"]:
+                                    node = memory_banks[current_bank]["nodes"][entity_id]
+                                    all_entities[entity_id] = {
+                                        "type": node.data.get("type", "unknown"),
+                                        "confidence": node.data.get("confidence", 1.0)
+                                    }
+                                
+                                obs_relationships = extract_relationships(combined_text, all_entities)
+                                
+                                # Create extracted relationships
+                                for rel in obs_relationships:
+                                    if (rel["from"] in memory_banks[current_bank]["nodes"] and 
+                                        rel["to"] in memory_banks[current_bank]["nodes"]):
+                                        edge = Edge(
+                                            source=rel["from"],
+                                            target=rel["to"],
+                                            data={
+                                                "type": rel["type"],
+                                                "confidence": rel.get("confidence", 0.7),
+                                                "auto_extracted": True
+                                            }
+                                        )
+                                        edge.id = f"{edge.source}-{edge.target}-{len(memory_banks[current_bank]['edges'])}"
+                                        memory_banks[current_bank]["edges"].append(edge)
+                                        extracted_relationships.append(rel)
+                            except Exception as e:
+                                logger.error(f"Error during auto-extraction in add_observations: {e}")
+                        
+                        save_memory_banks()
+                        
+                        result_text = f"Added {added_count} observations"
+                        if auto_extract and extracted_count > 0:
+                            result_text += f"\nAuto-extracted {extracted_count} additional entities and {len(extracted_relationships)} relationships from observations"
+                        
+                    except Exception as e:
+                        logger.error(f"Error in add_observations: {e}")
+                        result_text = f"Added {added_count} observations (with errors during auto-extraction)"
                     
                     response = {
                         "jsonrpc": "2.0",
@@ -2974,7 +3162,7 @@ async def handle_mcp_stdio():
                             "content": [
                                 {
                                     "type": "text",
-                                    "text": f"Added {added_count} observations"
+                                    "text": result_text
                                 }
                             ]
                         }
@@ -3037,7 +3225,7 @@ async def handle_mcp_stdio():
                     bank = arguments.get("bank", current_bank)
                     source = arguments.get("source", "text_input")
                     extract_entities = arguments.get("extract_entities", True)
-                    extract_relationships = arguments.get("extract_relationships", True)
+                    should_extract_relationships = arguments.get("extract_relationships", True)
                     create_observations = arguments.get("create_observations", True)
                     
                     # Process the knowledge ingestion
@@ -3080,7 +3268,7 @@ async def handle_mcp_stdio():
                                     memory_banks[bank]["observations"].append(obs)
                                     observations_created += 1
                         
-                        if extract_relationships and extracted_entities:
+                        if should_extract_relationships and extracted_entities:
                             relationships = extract_relationships(text, extracted_entities)
                             
                             for rel in relationships:
