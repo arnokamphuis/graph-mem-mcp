@@ -129,6 +129,37 @@ curl -X POST http://localhost:8000/entities?bank=project-alpha \
 
 ## 🤖 AI Agent Integration
 
+### VS Code Configuration
+
+To use this MCP server with VS Code Agent Chat, create or update your MCP configuration file. The exact location depends on your VS Code setup, but common locations include:
+
+- `%APPDATA%\Code\User\globalStorage\rooveterinaryinc.roo-cline\settings\cline_mcp_settings.json`
+- Or look for MCP settings in VS Code's Agent Chat extension settings
+
+```json
+{
+  "mcpServers": {
+    "graph-memory": {
+      "command": "podman",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-v",
+        "graph-mcp-memory:/data",
+        "graph-mcp-server",
+        "python",
+        "main.py",
+        "--mcp"
+      ],
+      "type": "stdio"
+    }
+  }
+}
+```
+
+No need to start the server manually - VS Code will manage the container lifecycle automatically.
+
 ### MCP Tools Available
 
 1. **create_entities**: Create multiple entities with observations

@@ -12,4 +12,5 @@ RUN pip install fastapi uvicorn pydantic
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Default command runs HTTP server, but can be overridden for MCP stdio mode
+CMD ["python", "main.py"]

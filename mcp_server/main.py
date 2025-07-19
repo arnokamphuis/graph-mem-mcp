@@ -8,6 +8,7 @@ import time
 import logging
 import os
 import re
+import sys
 from pathlib import Path
 
 # Set up logging
@@ -98,7 +99,7 @@ def serialize_memory_banks():
     serialized = {}
     for bank_name, bank_data in memory_banks.items():
         serialized[bank_name] = {
-            "nodes": {node_id: node.dict() for node_id, node in bank_data["nodes"].items()},
+            "nodes": {node_id: node.model_dump() for node_id, node in bank_data["nodes"].items()},
             "edges": [edge.dict() for edge in bank_data["edges"]],
             "observations": [obs.dict() for obs in bank_data["observations"]],
             "reasoning_steps": [step.dict() for step in bank_data["reasoning_steps"]]
@@ -667,3 +668,295 @@ def initialize():
         },
         media_type="application/json"
     )
+
+# MCP stdio mode - for proper MCP protocol compliance
+async def handle_mcp_stdio():
+    """Handle MCP communication over stdio"""
+    logger.info("Starting MCP stdio mode")
+    
+    while True:
+        try:
+            # Read JSON-RPC request from stdin
+            line = sys.stdin.readline()
+            if not line:
+                break
+                
+            request = json.loads(line.strip())
+            logger.info(f"MCP stdio request: {request}")
+            
+            # Handle the request
+            if request.get("method") == "initialize":
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": request.get("id"),
+                    "result": {
+                        "protocolVersion": "2025-06-18",
+                        "serverInfo": {
+                            "name": "Graph Memory MCP Server",
+                            "version": "1.0"
+                        },
+                        "capabilities": {
+                            "tools": {"listChanged": True},
+                            "resources": {"subscribe": False, "listChanged": True},
+                            "roots": {"listChanged": True},
+                            "prompts": {"listChanged": False},
+                            "completion": {"supports": ["text"]}
+                        }
+                    }
+                }
+            elif request.get("method") == "tools/list":
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": request.get("id"),
+                    "result": {
+                        "tools": [
+                            {
+                                "name": "create_entities",
+                                "description": "Create multiple new entities in the knowledge graph",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "entities": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "name": {"type": "string"},
+                                                    "entityType": {"type": "string"},
+                                                    "observations": {"type": "array", "items": {"type": "string"}}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            {
+                                "name": "add_observations",
+                                "description": "Add new observations to existing entities",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "observations": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "entityName": {"type": "string"},
+                                                    "contents": {"type": "array", "items": {"type": "string"}}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            {
+                                "name": "create_relations",
+                                "description": "Create relations between entities",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "relations": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "from": {"type": "string"},
+                                                    "to": {"type": "string"},
+                                                    "relationType": {"type": "string"}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            {
+                                "name": "sequential_thinking",
+                                "description": "Add reasoning steps to the knowledge graph",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "step": {
+                                            "type": "object",
+                                            "properties": {
+                                                "thought": {"type": "string"},
+                                                "step_number": {"type": "number"},
+                                                "reasoning": {"type": "string"}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                }
+            elif request.get("method") == "tools/call":
+                # Handle tool calls
+                tool_name = request.get("params", {}).get("name")
+                arguments = request.get("params", {}).get("arguments", {})
+                
+                if tool_name == "create_entities":
+                    entities = arguments.get("entities", [])
+                    created_entities = []
+                    for entity_data in entities:
+                        node = Node(
+                            id=entity_data["name"],
+                            data={
+                                "type": entity_data["entityType"],
+                                "observations": entity_data.get("observations", [])
+                            }
+                        )
+                        memory_banks[current_bank]["nodes"][node.id] = node
+                        created_entities.append(node.model_dump())
+                    save_memory_banks()
+                    
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Created {len(created_entities)} entities: {[e['id'] for e in created_entities]}"
+                                }
+                            ]
+                        }
+                    }
+                    
+                elif tool_name == "add_observations":
+                    observations = arguments.get("observations", [])
+                    added_count = 0
+                    for obs_data in observations:
+                        entity_name = obs_data["entityName"]
+                        contents = obs_data.get("contents", [])
+                        if entity_name in memory_banks[current_bank]["nodes"]:
+                            for content in contents:
+                                obs = Observation(
+                                    id=f"obs-{len(memory_banks[current_bank]['observations'])}",
+                                    entity_id=entity_name,
+                                    content=content,
+                                    timestamp=str(time.time())
+                                )
+                                memory_banks[current_bank]["observations"].append(obs)
+                                added_count += 1
+                    save_memory_banks()
+                    
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Added {added_count} observations"
+                                }
+                            ]
+                        }
+                    }
+                    
+                elif tool_name == "create_relations":
+                    relations = arguments.get("relations", [])
+                    created_relations = []
+                    for rel_data in relations:
+                        edge = Edge(
+                            source=rel_data["from"],
+                            target=rel_data["to"],
+                            data={"type": rel_data["relationType"]}
+                        )
+                        edge.id = f"{edge.source}-{edge.target}-{len(memory_banks[current_bank]['edges'])}"
+                        memory_banks[current_bank]["edges"].append(edge)
+                        created_relations.append(edge.dict())
+                    save_memory_banks()
+                    
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Created {len(created_relations)} relations"
+                                }
+                            ]
+                        }
+                    }
+                    
+                elif tool_name == "sequential_thinking":
+                    step_data = arguments.get("step", {})
+                    step = ReasoningStep(
+                        id=f"step-{len(memory_banks[current_bank]['reasoning_steps'])}",
+                        description=step_data.get("thought", ""),
+                        status="completed",
+                        timestamp=str(time.time())
+                    )
+                    memory_banks[current_bank]["reasoning_steps"].append(step)
+                    save_memory_banks()
+                    
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Added reasoning step: {step.description}"
+                                }
+                            ]
+                        }
+                    }
+                else:
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "error": {
+                            "code": -32601,
+                            "message": f"Unknown tool: {tool_name}"
+                        }
+                    }
+            else:
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": request.get("id"),
+                    "error": {
+                        "code": -32601,
+                        "message": "Method not found"
+                    }
+                }
+            
+            # Send response to stdout
+            print(json.dumps(response))
+            sys.stdout.flush()
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error: {e}")
+            error_response = {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {
+                    "code": -32700,
+                    "message": "Parse error"
+                }
+            }
+            print(json.dumps(error_response))
+            sys.stdout.flush()
+        except Exception as e:
+            logger.error(f"Error handling request: {e}")
+            error_response = {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {
+                    "code": -32603,
+                    "message": "Internal error"
+                }
+            }
+            print(json.dumps(error_response))
+            sys.stdout.flush()
+
+if __name__ == "__main__":
+    # Check if running in MCP stdio mode
+    if len(sys.argv) > 1 and sys.argv[1] == "--mcp":
+        # Run in MCP stdio mode
+        asyncio.run(handle_mcp_stdio())
+    else:
+        # Run as HTTP server (default)
+        import uvicorn
+        uvicorn.run(app, host="0.0.0.0", port=8000)
