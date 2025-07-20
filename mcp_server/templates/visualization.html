@@ -568,20 +568,29 @@
                 // Create nodes and edges datasets
                 const nodes = new vis.DataSet(data.nodes.map(node => ({
                     id: node.id,
-                    label: node.label,
-                    title: `Type: ${node.type}\nSize: ${node.size}`,
+                    label: node.label.length > 15 ? node.label.substring(0, 15) + '...' : node.label,
+                    title: `${node.label}\nType: ${node.type}\nSize: ${node.size}`,
                     color: {
                         background: getNodeColor(node.type),
                         border: '#2B7CE9',
                         highlight: { background: '#FFFF00', border: '#2B7CE9' }
                     },
-                    size: Math.max(20, node.size * 3),
-                    font: { size: 14, color: '#333' },
+                    size: Math.max(15, node.size * 2),
+                    shape: 'dot',
+                    font: { 
+                        size: 10, 
+                        color: '#333',
+                        strokeWidth: 1,
+                        strokeColor: '#ffffff',
+                        align: 'center'
+                    },
+                    margin: 15,
                     // Store additional data for detailed view
                     observations: node.observations || [],
                     nodeType: node.type,
                     created_at: node.created_at,
-                    updated_at: node.updated_at
+                    updated_at: node.updated_at,
+                    fullName: node.label
                 })));
 
                 debugLog('Creating edges dataset');
@@ -613,7 +622,15 @@
                 const options = {
                     physics: {
                         enabled: true,
-                        stabilization: { iterations: 100 }
+                        stabilization: { iterations: 150 },
+                        barnesHut: {
+                            gravitationalConstant: -8000,
+                            centralGravity: 0.3,
+                            springLength: 200,
+                            springConstant: 0.04,
+                            damping: 0.09,
+                            avoidOverlap: 0.1
+                        }
                     },
                     layout: {
                         improvedLayout: true
@@ -621,6 +638,45 @@
                     interaction: {
                         selectConnectedEdges: false,
                         hover: true
+                    },
+                    nodes: {
+                        shape: 'circle',
+                        font: {
+                            size: 12,
+                            color: '#333',
+                            strokeWidth: 2,
+                            strokeColor: '#ffffff',
+                            align: 'center'
+                        },
+                        labelHighlightBold: true,
+                        borderWidth: 2,
+                        shadow: {
+                            enabled: true,
+                            color: 'rgba(0,0,0,0.2)',
+                            size: 5,
+                            x: 2,
+                            y: 2
+                        },
+                        chosen: {
+                            node: function(values, id, selected, hovering) {
+                                values.shadow = true;
+                                values.shadowSize = 10;
+                            }
+                        }
+                    },
+                    edges: {
+                        font: {
+                            size: 10,
+                            color: '#666',
+                            strokeWidth: 1,
+                            strokeColor: '#ffffff'
+                        },
+                        smooth: {
+                            enabled: true,
+                            type: 'continuous',
+                            roundness: 0.5
+                        },
+                        length: 200
                     }
                 };
 
@@ -735,10 +791,10 @@
                 
                 const info = `
                     <div class="node-details">
-                        <h4><i class="fas fa-circle"></i> ${nodeData.label}</h4>
+                        <h4><i class="fas fa-circle"></i> ${nodeData.fullName || nodeData.label}</h4>
                         <div class="detail-item">
                             <span class="detail-label">Type:</span>
-                            <span class="detail-value">${nodeData.title.split('\n')[0].replace('Type: ', '')}</span>
+                            <span class="detail-value">${nodeData.nodeType || nodeData.title.split('\n')[1].replace('Type: ', '')}</span>
                         </div>
                         <div class="detail-item">
                             <span class="detail-label">Connections:</span>
