@@ -981,17 +981,38 @@ async def root():
     # Render the enhanced visualization page
     return visualize_graph(default_bank)
 
+# Enhanced knowledge graph construction
+try:
+    from enhanced_kg_construction import EnhancedKGConstructor
+    kg_constructor = EnhancedKGConstructor()
+    ENHANCED_KG_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Enhanced KG construction not available: {e}")
+    ENHANCED_KG_AVAILABLE = False
+    kg_constructor = None
+
 # New endpoint: ingest long text and update/extend graph in a specific bank
 
 @app.post("/context/ingest")
 def ingest_context(payload: TextIngest = Body(...)):
     """
     Ingest a long piece of text and update/extend the graph in the selected or specified bank.
+    Uses enhanced NLP-based knowledge graph construction if available, falls back to basic method.
     Request body: {"text": "...", "bank": "bank_name"}
     Response: {"status": "success", "entities": [...], "edges_added": N, "bank": "bank_name"}
     """
     text = payload.text
     b = payload.bank or current_bank
+    
+    if ENHANCED_KG_AVAILABLE and kg_constructor:
+        try:
+            # Use enhanced knowledge graph construction
+            result = enhanced_ingest_context(text, b)
+            return result
+        except Exception as e:
+            logger.error(f"Enhanced KG construction failed: {e}, falling back to basic method")
+    
+    # Fallback to original simple method
     # Simple entity extraction: words starting with capital letters (as example)
     entities = set(re.findall(r'\b[A-Z][a-zA-Z0-9_]+\b', text))
     # Add entities as nodes
@@ -1008,6 +1029,95 @@ def ingest_context(payload: TextIngest = Body(...)):
             memory_banks[b]["edges"].append(edge)
     save_memory_banks()  # Persist the changes
     return {"status": "success", "entities": list(entities), "edges_added": len(memory_banks[b]["edges"]), "bank": b}
+
+def enhanced_ingest_context(text: str, bank: str) -> dict:
+    """
+    Enhanced knowledge graph construction using advanced NLP techniques
+    """
+    # Get existing observations to link with new concepts
+    existing_observations = [obs.content for obs in memory_banks[bank]["observations"]]
+    
+    # Construct knowledge graph using enhanced method
+    kg_result = kg_constructor.construct_knowledge_graph(text, existing_observations)
+    
+    concepts = kg_result['concepts']
+    relationships = kg_result['relationships'] 
+    observation_links = kg_result['observation_links']
+    stats = kg_result['stats']
+    
+    # Add concepts as nodes
+    entities_added = []
+    for concept in concepts:
+        if concept.id not in memory_banks[bank]["nodes"]:
+            node_data = {
+                "name": concept.name,
+                "type": concept.type,
+                "aliases": concept.aliases,
+                "confidence": concept.confidence,
+                "from_enhanced_kg": True
+            }
+            node = Node(id=concept.id, data=node_data)
+            memory_banks[bank]["nodes"][concept.id] = node
+            entities_added.append(concept.id)
+        else:
+            # Update existing node with new information
+            existing_node = memory_banks[bank]["nodes"][concept.id]
+            if "aliases" not in existing_node.data:
+                existing_node.data["aliases"] = []
+            existing_node.data["aliases"].extend(concept.aliases)
+            existing_node.data["aliases"] = list(set(existing_node.data["aliases"]))  # Remove duplicates
+    
+    # Add relationships as edges
+    edges_added = 0
+    for rel in relationships:
+        # Check if relationship already exists
+        existing_edge = None
+        for edge in memory_banks[bank]["edges"]:
+            if (edge.source == rel.source and edge.target == rel.target and 
+                edge.data.get("relation_type") == rel.relation_type):
+                existing_edge = edge
+                break
+        
+        if not existing_edge:
+            edge_data = {
+                "relation_type": rel.relation_type,
+                "confidence": rel.confidence,
+                "context": rel.context,
+                "dependency_path": rel.dependency_path,
+                "from_enhanced_kg": True
+            }
+            edge = Edge(source=rel.source, target=rel.target, data=edge_data)
+            memory_banks[bank]["edges"].append(edge)
+            edges_added += 1
+    
+    # Link observations to concepts
+    observations_linked = 0
+    for concept_id, observations in observation_links.items():
+        for obs_text in observations:
+            # Create new observation or link existing one
+            obs_id = str(uuid.uuid4())
+            observation = Observation(
+                id=obs_id,
+                entity_id=concept_id,
+                content=obs_text,
+                timestamp=datetime.now().isoformat()
+            )
+            memory_banks[bank]["observations"].append(observation)
+            observations_linked += 1
+    
+    save_memory_banks()  # Persist the changes
+    
+    return {
+        "status": "success",
+        "method": "enhanced_nlp",
+        "entities_added": entities_added,
+        "total_entities": len(memory_banks[bank]["nodes"]),
+        "edges_added": edges_added,
+        "total_edges": len(memory_banks[bank]["edges"]),
+        "observations_linked": observations_linked,
+        "bank": bank,
+        "stats": stats
+    }
 
 
 class KnowledgeIngest(BaseModel):
