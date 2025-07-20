@@ -2635,9 +2635,16 @@ def extract_relationships(text: str, entities: dict):
     return entities
 
 def extract_relationships(text: str, entities: dict):
-    """Extract relationships between entities with context, filtering out stop words"""
+    """
+    Extract semantically meaningful relationships between entities.
+    
+    This enhanced version replaces generic "related_to" relationships with 
+    specific semantic relationship types based on linguistic patterns,
+    contextual analysis, and domain knowledge.
+    """
     relationships = []
-    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
+    
+    # Use the same stop_words validation as extract_advanced_entities
     stop_words = {
         'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
     }
@@ -2650,30 +2657,166 @@ def extract_relationships(text: str, entities: dict):
                 not entity_lower.isdigit() and
                 len(entity_text.strip()) > 1)
     
-    # Extract relationships from text
-    sentences = re.split(r'[.!?]', text)
+    # Split text into sentences for semantic analysis
+    sentences = re.split(r'[.!?;]', text)
+    
     for sentence in sentences:
         sentence = sentence.strip()
         if len(sentence) < 10:
             continue
-        
+            
+        # Find entities in this sentence with positions
         sentence_entities = []
+        entity_positions = {}
+        
         for entity in entities.keys():
             if entity.lower() in sentence.lower() and is_valid_entity(entity):
                 sentence_entities.append(entity)
+                entity_positions[entity] = sentence.lower().find(entity.lower())
         
+        # Sort entities by position for better relationship extraction
+        sentence_entities.sort(key=lambda e: entity_positions[e])
+        
+        # Extract semantic relationships between entity pairs
         for i, entity1 in enumerate(sentence_entities):
             for entity2 in sentence_entities[i+1:]:
-                if is_valid_entity(entity1) and is_valid_entity(entity2):
-                    relationships.append({
-                        "from": entity1,
-                        "to": entity2,
-                        "type": "related_to",
-                        "context": sentence[:100] + "..." if len(sentence) > 100 else sentence,
-                        "confidence": 0.4
-                    })
+                relationship = _analyze_entity_relationship(
+                    sentence, entity1, entity2, entities
+                )
+                if relationship:
+                    relationships.append(relationship)
     
     return relationships
+
+
+def _analyze_entity_relationship(sentence: str, entity1: str, entity2: str, entities: dict):
+    """Analyze the semantic relationship between two entities in a sentence."""
+    sentence_lower = sentence.lower()
+    entity1_lower = entity1.lower()
+    entity2_lower = entity2.lower()
+    
+    # Get entity types for context
+    entity1_type = entities.get(entity1, {}).get("type", "unknown")
+    entity2_type = entities.get(entity2, {}).get("type", "unknown")
+    
+    # Find positions and ensure proper ordering
+    pos1 = sentence_lower.find(entity1_lower)
+    pos2 = sentence_lower.find(entity2_lower)
+    
+    if pos1 == -1 or pos2 == -1:
+        return None
+    
+    # Ensure entity1 comes before entity2
+    if pos1 > pos2:
+        entity1, entity2 = entity2, entity1
+        entity1_lower, entity2_lower = entity2_lower, entity1_lower
+        entity1_type, entity2_type = entity2_type, entity1_type
+        pos1, pos2 = pos2, pos1
+    
+    # Extract connecting text between entities
+    start = pos1 + len(entity1_lower)
+    end = pos2
+    connecting_text = sentence_lower[start:end].strip()
+    
+    # Determine relationship type using multiple strategies
+    relationship_type = _extract_pattern_based_relationship(
+        sentence_lower, entity1_lower, entity2_lower
+    )
+    
+    if relationship_type == "related_to":
+        relationship_type = _extract_contextual_relationship(
+            connecting_text, entity1_type, entity2_type
+        )
+    
+    if relationship_type == "related_to":
+        relationship_type = _infer_domain_relationship(entity1_type, entity2_type)
+    
+    # Calculate confidence based on relationship specificity
+    confidence = 0.3 if relationship_type == "related_to" else (
+        0.9 if relationship_type in ['is_type_of', 'created_by', 'has', 'uses'] else 0.7
+    )
+    
+    return {
+        "from": entity1,
+        "to": entity2,
+        "type": relationship_type,
+        "context": sentence[:200] + "..." if len(sentence) > 200 else sentence,
+        "confidence": confidence,
+        "connecting_text": connecting_text
+    }
+
+
+def _extract_pattern_based_relationship(sentence: str, entity1: str, entity2: str):
+    """Extract relationships using predefined linguistic patterns."""
+    
+    # Hierarchical patterns
+    if re.search(f'{re.escape(entity1)}\\s+(?:is\\s+an?\\s+|are\\s+|is\\s+a\\s+type\\s+of\\s+).*{re.escape(entity2)}', sentence):
+        return "is_type_of"
+    
+    # Possession patterns  
+    if re.search(f'{re.escape(entity1)}\\s+(?:has\\s+|contains\\s+|includes\\s+|owns\\s+).*{re.escape(entity2)}', sentence):
+        return "has"
+    
+    # Creation patterns
+    if re.search(f'{re.escape(entity1)}\\s+(?:created\\s+|developed\\s+|built\\s+|designed\\s+|founded\\s+).*{re.escape(entity2)}', sentence):
+        return "created"
+    
+    # Usage patterns
+    if re.search(f'{re.escape(entity1)}\\s+(?:uses\\s+|utilizes\\s+|employs\\s+|relies\\s+on\\s+|depends\\s+on\\s+).*{re.escape(entity2)}', sentence):
+        return "uses"
+    
+    # Implementation patterns
+    if re.search(f'{re.escape(entity1)}\\s+(?:implements\\s+|extends\\s+|inherits\\s+from\\s+).*{re.escape(entity2)}', sentence):
+        return "implements"
+    
+    # Location patterns
+    if re.search(f'{re.escape(entity1)}\\s+(?:in\\s+|at\\s+|within\\s+|located\\s+in\\s+).*{re.escape(entity2)}', sentence):
+        return "located_in"
+    
+    return "related_to"
+
+
+def _extract_contextual_relationship(connecting_text: str, entity1_type: str, entity2_type: str):
+    """Extract relationships based on contextual analysis."""
+    
+    # Action verbs
+    action_verbs = {
+        'manages': 'manages', 'leads': 'leads', 'works for': 'works_for',
+        'supports': 'supports', 'processes': 'processes', 'generates': 'generates',
+        'controls': 'controls', 'monitors': 'monitors', 'validates': 'validates'
+    }
+    
+    for verb, relationship in action_verbs.items():
+        if verb in connecting_text:
+            return relationship
+    
+    # Preposition-based relationships
+    if ' with ' in connecting_text:
+        return 'associated_with'
+    elif ' by ' in connecting_text:
+        return 'performed_by'
+    elif ' for ' in connecting_text:
+        return 'intended_for'
+    
+    return "related_to"
+
+
+def _infer_domain_relationship(entity1_type: str, entity2_type: str):
+    """Infer relationships based on entity types."""
+    
+    # Person-Organization
+    if entity1_type in ['person', 'named_entity'] and entity2_type in ['organization', 'company']:
+        return "works_for"
+    
+    # Technology relationships
+    if entity1_type == 'technical_term' and entity2_type == 'technical_term':
+        return "depends_on"
+    
+    # Temporal relationships
+    if entity1_type == 'date' or entity2_type == 'date':
+        return "occurred_on"
+    
+    return "related_to"
 
 # MCP agent initialization endpoint
 
