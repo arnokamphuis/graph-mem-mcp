@@ -168,6 +168,10 @@ Modify `main.py` to use the new core components for better KG construction.
 - [x] **PHASE 1 COMPLETE** - All core components tested and validated
 
 ### 🔄 In Progress
+- [ ] **Phase 2: Advanced NLP & ML Integration** - STARTING
+  - [ ] Sophisticated relationship extraction (Phase 2.1)
+  - [ ] Enhanced entity extraction (Phase 2.2)  
+  - [ ] Coreference resolution (Phase 2.3)
 - [ ] Integration with existing FastAPI system
 - [ ] Migration strategy from old to new implementation
 

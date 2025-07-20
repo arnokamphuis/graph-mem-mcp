@@ -13,7 +13,18 @@ except ImportError:
     print("Warning: pydantic not available, using basic dataclasses")
     from dataclasses import dataclass, field
     BaseModel = object
-    Field = field
+    
+    def Field(**kwargs):
+        """Fallback Field function that ignores validation kwargs"""
+        default = kwargs.get('default', None)
+        default_factory = kwargs.get('default_factory', None)
+        if default_factory:
+            return field(default_factory=default_factory)
+        elif default is not None:
+            return field(default=default)
+        else:
+            return field()
+    
     def validator(*args, **kwargs):
         def decorator(func):
             return func
