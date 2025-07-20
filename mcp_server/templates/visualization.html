@@ -443,18 +443,15 @@
         }
 
         async function switchToBank(selectedBank) {
-            debugLog('switchToBank called with: ' + selectedBank);
             
             if (!selectedBank) {
                 selectedBank = document.getElementById('bankSelect').value;
-                debugLog('No bank provided, using select value: ' + selectedBank);
             }
 
             // Show enhanced loading state with bank info
             const selectedBankInfo = availableBanks.find(b => b.bank === selectedBank);
             const bankStats = selectedBankInfo ? selectedBankInfo.stats : { entities: '?', relationships: '?', observations: '?' };
 
-            debugLog('Switching to bank: ' + selectedBank);
             document.getElementById('selectedInfo').innerHTML = `
                 <div class="alert alert-info">
                     <i class="fas fa-spinner fa-spin"></i> Switching to bank: <strong>${selectedBank}</strong>
@@ -464,7 +461,6 @@
 
             // Update current bank
             currentBank = selectedBank;
-            debugLog('Updated currentBank to: ' + currentBank);
 
             // Update page title and header with enhanced info
             const totalBanks = availableBanks.length;
@@ -476,9 +472,7 @@
             history.pushState({bank: selectedBank}, '', newUrl);
 
             // Load the new bank's graph
-            debugLog('Calling initNetwork for bank: ' + selectedBank);
             await initNetwork(selectedBank);
-            debugLog('initNetwork completed for bank: ' + selectedBank);
         }
 
         async function showCreateBankModal() {
@@ -518,21 +512,17 @@
 
         async function initNetwork(bankName) {
             try {
-                debugLog('initNetwork called with bank: ' + bankName);
                 
                 // Destroy existing network if it exists
                 if (network) {
-                    debugLog('Destroying existing network...');
                     network.destroy();
                     network = null;
                 }
                 
                 const response = await fetch(`/visualizations?bank=${bankName}`);
                 const data = await response.json();
-                debugLog('Received data with ' + data.nodes.length + ' nodes and ' + data.edges.length + ' edges');
 
                 if (data.error) {
-                    debugLog('API returned error: ' + data.error);
                     document.getElementById('selectedInfo').innerHTML = `
                         <div class="alert alert-error">
                             <i class="fas fa-exclamation-circle"></i> Error: ${data.error}
@@ -541,7 +531,6 @@
                     return;
                 }
 
-                debugLog('Creating nodes dataset');
                 // Create nodes and edges datasets
                 const nodes = new vis.DataSet(data.nodes.map(node => ({
                     id: node.id,
@@ -570,7 +559,6 @@
                     fullName: node.label
                 })));
 
-                debugLog('Creating edges dataset');
                 const edges = new vis.DataSet(data.edges.map(edge => ({
                     from: edge.source,
                     to: edge.target,
@@ -581,20 +569,15 @@
                 })));
 
                 const container = document.getElementById('mynetworkid');
-                debugLog('Container element found: ' + (container ? 'YES' : 'NO'));
                 
                 if (!container) {
-                    debugLog('ERROR: Container element not found!');
                     return;
                 }
 
                 // Check container dimensions
                 const rect = container.getBoundingClientRect();
-                debugLog('Container dimensions: ' + rect.width + 'x' + rect.height);
-                debugLog('Container computed style height: ' + getComputedStyle(container).height);
 
                 const networkData = { nodes: nodes, edges: edges };
-                debugLog('Network data prepared');
                 
                 const options = {
                     physics: {
@@ -657,28 +640,19 @@
                     }
                 };
 
-                debugLog('Creating vis.Network...');
                 network = new vis.Network(container, networkData, options);
-                debugLog('vis.Network created successfully!');
 
                 // Test network after creation
                 setTimeout(() => {
-                    debugLog('Network check after 2 seconds:');
-                    debugLog('- Network exists: ' + (network ? 'YES' : 'NO'));
                     if (network && network.body && network.body.data) {
-                        debugLog('- Nodes in network: ' + network.body.data.nodes.length);
-                        debugLog('- Edges in network: ' + network.body.data.edges.length);
                         
                         // Check node positions
                         const nodePositions = network.getPositions();
-                        debugLog('- Node positions: ' + JSON.stringify(nodePositions));
                         
                         // Check if nodes are visible
                         const allNodes = network.body.data.nodes.get();
-                        debugLog('- Node data: ' + JSON.stringify(allNodes.map(n => ({id: n.id, label: n.label}))));
                         
                         // Try to fit the network
-                        debugLog('- Fitting network to view...');
                         network.fit();
                     }
                 }, 2000);
@@ -708,11 +682,8 @@
                         <i class="fas fa-mouse-pointer"></i> Click on a node to see details
                     </div>
                 `;
-                debugLog('Selection info reset to default state');
 
             } catch (error) {
-                debugLog('ERROR in initNetwork: ' + error.message);
-                debugLog('Error stack: ' + error.stack);
                 document.getElementById('selectedInfo').innerHTML = `
                     <div class="alert alert-error">
                         <i class="fas fa-exclamation-triangle"></i> Error loading graph: ${error.message}
