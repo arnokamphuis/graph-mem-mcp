@@ -913,7 +913,10 @@ def get_visualizations(bank: str = Query(None)):
             "id": entity_id,
             "label": entity_id,
             "type": entity.data.get("type", "unknown"),
-            "size": len(entity.data.get("observations", [])) + 1
+            "size": len(entity.data.get("observations", [])) + 1,
+            "observations": entity.data.get("observations", []),
+            "created_at": entity.data.get("created_at", ""),
+            "updated_at": entity.data.get("updated_at", "")
         })
     
     # Convert relationships to visualization edges
@@ -936,6 +939,47 @@ def get_visualizations(bank: str = Query(None)):
             "edge_types": list(set([e["type"] for e in edges]))
         }
     }
+
+@app.get("/banks/{bank}/visualize")
+def visualize_graph(bank: str):
+    """
+    Serve interactive graph visualization page for a specific memory bank.
+    """
+    if bank not in memory_banks:
+        return JSONResponse(content={"error": "Bank not found"}, status_code=404)
+
+    try:
+        # Read the HTML template from file
+        template_path = Path(__file__).parent / "templates" / "visualization.html"
+        with open(template_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        
+        # Replace template variables
+        html_content = html_content.replace('{{bank}}', bank)
+        
+        return StreamingResponse(
+            iter([html_content]),
+            media_type="text/html"
+        )
+    except FileNotFoundError:
+        return JSONResponse(
+            content={"error": "Visualization template not found"}, 
+            status_code=500
+        )
+    except Exception as e:
+        return JSONResponse(
+            content={"error": f"Error loading visualization: {str(e)}"}, 
+            status_code=500
+        )
+
+@app.get("/")
+async def root():
+    """Root endpoint - redirects to visualization"""
+    # Default to first available bank or 'default'
+    default_bank = 'default' if 'default' in memory_banks else list(memory_banks.keys())[0] if memory_banks else 'default'
+    
+    # Render the enhanced visualization page
+    return visualize_graph(default_bank)
 
 # New endpoint: ingest long text and update/extend graph in a specific bank
 

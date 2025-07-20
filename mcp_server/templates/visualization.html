@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Knowledge Graph Visualization - Bank: {{bank}}</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .header h1 {
+            color: #2c3e50;
+            font-size: 1.8rem;
+            font-weight: 600;
+        }
+
+        .header h2 {
+            color: #34495e;
+            font-size: 1.2rem;
+            font-weight: 400;
+        }
+
+        .controls {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        select, button {
+            padding: 0.5rem 1rem;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            background: white;
+            color: #333;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
+
+        select:focus, button:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        button:hover {
+            background: #5a6fd8;
+            border-color: #5a6fd8;
+            transform: translateY(-1px);
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            gap: 1rem;
+            padding: 1rem;
+        }
+
+        .sidebar {
+            width: 300px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .graph-container {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        #mynetworkid {
+            width: 100%;
+            height: 600px;  /* Fixed height instead of 100% */
+            border-radius: 12px;
+        }
+
+        .stats {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .stat-card {
+            flex: 1;
+            min-width: 80px;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 1rem;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-number {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 0.25rem;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            opacity: 0.9;
+        }
+
+        .info-section {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 1rem;
+            border-left: 4px solid #667eea;
+        }
+
+        .info-section h3 {
+            color: #2c3e50;
+            margin-bottom: 0.5rem;
+            font-size: 1rem;
+        }
+
+        .alert {
+            padding: 1rem;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .alert-info {
+            background: #e3f2fd;
+            color: #1976d2;
+            border: 1px solid #bbdefb;
+        }
+
+        .alert-success {
+            background: #e8f5e8;
+            color: #2e7d32;
+            border: 1px solid #c8e6c9;
+        }
+
+        .alert-error {
+            background: #ffebee;
+            color: #c62828;
+            border: 1px solid #ffcdd2;
+        }
+
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            max-width: 500px;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal h3 {
+            color: #2c3e50;
+            margin-bottom: 1rem;
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 0.5rem;
+        }
+
+        .node-details {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .detail-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+
+        .detail-label {
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .detail-value {
+            color: #6c757d;
+        }
+
+        .detail-section {
+            margin-top: 1rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid #dee2e6;
+        }
+
+        .detail-section h5 {
+            color: #495057;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .connection-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.25rem 0.5rem;
+            margin: 0.25rem 0;
+            background: #e9ecef;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+
+        .connection-node {
+            font-weight: 500;
+            color: #495057;
+        }
+
+        .connection-type {
+            color: #6c757d;
+            font-style: italic;
+            font-size: 0.8rem;
+        }
+
+        .observation-item {
+            margin: 0.5rem 0;
+            padding: 0.5rem;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 3px solid #667eea;
+        }
+
+        .observation-number {
+            color: #667eea;
+            font-weight: bold;
+            margin-right: 0.5rem;
+        }
+
+        .observation-text {
+            color: #495057;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: 100%;
+                order: 2;
+            }
+
+            .controls {
+                justify-content: center;
+            }
+
+            .header {
+                text-align: center;
+            }
+
+            .stats {
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div>
+                <h1><i class="fas fa-project-diagram"></i> Knowledge Graph Visualization</h1>
+                <h2>Memory Bank: <span style="color: #667eea;">{{bank}}</span></h2>
+            </div>
+            <div class="controls">
+                <div class="control-group">
+                    <label for="bankSelect">Switch Bank:</label>
+                    <select id="bankSelect">
+                        <option value="{{bank}}">{{bank}}</option>
+                    </select>
+                </div>
+                <button onclick="refreshGraph()">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+                <button onclick="showCreateBankModal()">
+                    <i class="fas fa-plus"></i> New Bank
+                </button>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <aside class="sidebar">
+                <div class="info-section">
+                    <h3><i class="fas fa-chart-bar"></i> Graph Statistics</h3>
+                    <div id="networkStats" class="stats">
+                        <div class="stat-card">
+                            <div class="stat-number">0</div>
+                            <div class="stat-label">Entities</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number">0</div>
+                            <div class="stat-label">Relations</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="info-section">
+                    <h3><i class="fas fa-info-circle"></i> Selection Info</h3>
+                    <div id="selectedInfo">
+                        <div class="alert alert-info">
+                            <i class="fas fa-mouse-pointer"></i> Click on a node to see details
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Debug Panel -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-bug"></i> Debug Information</h3>
+                    </div>
+                    <div class="card-content">
+                        <div id="debugInfo" style="font-family: monospace; font-size: 12px; max-height: 200px; overflow-y: auto; background: #f5f5f5; padding: 10px; border-radius: 4px;">
+                            Debug log will appear here...
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <main class="graph-container">
+                <div id="mynetworkid"></div>
+            </main>
+        </div>
+    </div>
+
+    <script>
+        let network;
+        let currentBank = '{{bank}}';
+        let availableBanks = [];
+
+        // Debug logging function
+        function debugLog(message) {
+            console.log(message);
+            const debugDiv = document.getElementById('debugInfo');
+            if (debugDiv) {
+                const timestamp = new Date().toLocaleTimeString();
+                debugDiv.innerHTML += `[${timestamp}] ${message}<br>`;
+                debugDiv.scrollTop = debugDiv.scrollHeight;
+            }
+        }
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', function() {
+            debugLog('DOM Content Loaded');
+            debugLog('vis.js available: ' + (typeof vis !== 'undefined'));
+            loadAvailableBanks();
+            initNetwork(currentBank);
+        });
+
+        async function loadAvailableBanks() {
+            try {
+                const response = await fetch('/banks/list');
+                const data = await response.json();
+                availableBanks = data.banks.map(bank => ({
+                    bank: bank,
+                    stats: { entities: '?', relationships: '?', observations: '?' }
+                }));
+
+                const bankSelect = document.getElementById('bankSelect');
+                bankSelect.innerHTML = '';
+
+                availableBanks.forEach(bankInfo => {
+                    const option = document.createElement('option');
+                    option.value = bankInfo.bank;
+                    option.textContent = bankInfo.bank;
+                    if (bankInfo.bank === currentBank) {
+                        option.selected = true;
+                    }
+                    bankSelect.appendChild(option);
+                });
+
+                // Add bank switch event listener
+                bankSelect.addEventListener('change', function() {
+                    const selectedBank = this.value;
+                    if (selectedBank !== currentBank) {
+                        switchToBank(selectedBank);
+                    }
+                });
+
+                // Update page title
+                const totalBanks = availableBanks.length;
+                document.title = `Knowledge Graph Visualization - Bank: ${currentBank} (${totalBanks} banks available)`;
+
+            } catch (error) {
+                console.error('Error loading available banks:', error);
+                document.getElementById('selectedInfo').innerHTML = `
+                    <div class="alert alert-error">
+                        <i class="fas fa-exclamation-triangle"></i> Error loading banks: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        async function switchToBank(selectedBank) {
+            debugLog('switchToBank called with: ' + selectedBank);
+            
+            if (!selectedBank) {
+                selectedBank = document.getElementById('bankSelect').value;
+                debugLog('No bank provided, using select value: ' + selectedBank);
+            }
+
+            // Show enhanced loading state with bank info
+            const selectedBankInfo = availableBanks.find(b => b.bank === selectedBank);
+            const bankStats = selectedBankInfo ? selectedBankInfo.stats : { entities: '?', relationships: '?', observations: '?' };
+
+            debugLog('Switching to bank: ' + selectedBank);
+            document.getElementById('selectedInfo').innerHTML = `
+                <div class="alert alert-info">
+                    <i class="fas fa-spinner fa-spin"></i> Switching to bank: <strong>${selectedBank}</strong>
+                    <br><small>Loading entities and relationships...</small>
+                </div>
+            `;
+
+            // Update current bank
+            currentBank = selectedBank;
+            debugLog('Updated currentBank to: ' + currentBank);
+
+            // Update page title and header with enhanced info
+            const totalBanks = availableBanks.length;
+            document.title = `Knowledge Graph Visualization - Bank: ${selectedBank} (${totalBanks} banks available)`;
+            document.querySelector('.header h2').innerHTML = `Memory Bank: <span style="color: #667eea;">${selectedBank}</span> <small style="opacity: 0.7;">(1 of ${totalBanks})</small>`;
+
+            // Update browser URL without reload
+            const newUrl = `/banks/${selectedBank}/visualize`;
+            history.pushState({bank: selectedBank}, '', newUrl);
+
+            // Load the new bank's graph
+            debugLog('Calling initNetwork for bank: ' + selectedBank);
+            await initNetwork(selectedBank);
+            debugLog('initNetwork completed for bank: ' + selectedBank);
+        }
+
+        async function showCreateBankModal() {
+            const bankName = prompt('Enter name for new memory bank:');
+            if (!bankName) return;
+
+            try {
+                const response = await fetch('/banks/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ bank: bankName })
+                });
+
+                const result = await response.json();
+                if (result.status === 'success') {
+                    // Reload available banks
+                    await loadAvailableBanks();
+
+                    // Switch to the new bank
+                    document.getElementById('bankSelect').value = bankName;
+                    await switchToBank();
+
+                    // Show success message
+                    document.getElementById('selectedInfo').innerHTML = `
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle"></i> Bank "<strong>${bankName}</strong>" created successfully!
+                            <br><small>You can now add entities and relationships to this bank.</small>
+                        </div>
+                    `;
+                } else {
+                    alert('Error creating bank: ' + result.message);
+                }
+            } catch (error) {
+                alert('Error creating bank: ' + error.message);
+            }
+        }
+
+        async function initNetwork(bankName) {
+            try {
+                debugLog('initNetwork called with bank: ' + bankName);
+                
+                // Destroy existing network if it exists
+                if (network) {
+                    debugLog('Destroying existing network...');
+                    network.destroy();
+                    network = null;
+                }
+                
+                const response = await fetch(`/visualizations?bank=${bankName}`);
+                const data = await response.json();
+                debugLog('Received data with ' + data.nodes.length + ' nodes and ' + data.edges.length + ' edges');
+
+                if (data.error) {
+                    debugLog('API returned error: ' + data.error);
+                    document.getElementById('selectedInfo').innerHTML = `
+                        <div class="alert alert-error">
+                            <i class="fas fa-exclamation-circle"></i> Error: ${data.error}
+                        </div>
+                    `;
+                    return;
+                }
+
+                debugLog('Creating nodes dataset');
+                // Create nodes and edges datasets
+                const nodes = new vis.DataSet(data.nodes.map(node => ({
+                    id: node.id,
+                    label: node.label,
+                    title: `Type: ${node.type}\nSize: ${node.size}`,
+                    color: {
+                        background: getNodeColor(node.type),
+                        border: '#2B7CE9',
+                        highlight: { background: '#FFFF00', border: '#2B7CE9' }
+                    },
+                    size: Math.max(20, node.size * 3),
+                    font: { size: 14, color: '#333' },
+                    // Store additional data for detailed view
+                    observations: node.observations || [],
+                    nodeType: node.type,
+                    created_at: node.created_at,
+                    updated_at: node.updated_at
+                })));
+
+                debugLog('Creating edges dataset');
+                const edges = new vis.DataSet(data.edges.map(edge => ({
+                    from: edge.source,
+                    to: edge.target,
+                    label: edge.type,
+                    title: `Relationship: ${edge.type}`,
+                    color: { color: '#848484' },
+                    arrows: { to: { enabled: true, scaleFactor: 1 } }
+                })));
+
+                const container = document.getElementById('mynetworkid');
+                debugLog('Container element found: ' + (container ? 'YES' : 'NO'));
+                
+                if (!container) {
+                    debugLog('ERROR: Container element not found!');
+                    return;
+                }
+
+                // Check container dimensions
+                const rect = container.getBoundingClientRect();
+                debugLog('Container dimensions: ' + rect.width + 'x' + rect.height);
+                debugLog('Container computed style height: ' + getComputedStyle(container).height);
+
+                const networkData = { nodes: nodes, edges: edges };
+                debugLog('Network data prepared');
+                
+                const options = {
+                    physics: {
+                        enabled: true,
+                        stabilization: { iterations: 100 }
+                    },
+                    layout: {
+                        improvedLayout: true
+                    },
+                    interaction: {
+                        selectConnectedEdges: false,
+                        hover: true
+                    }
+                };
+
+                debugLog('Creating vis.Network...');
+                network = new vis.Network(container, networkData, options);
+                debugLog('vis.Network created successfully!');
+
+                // Test network after creation
+                setTimeout(() => {
+                    debugLog('Network check after 2 seconds:');
+                    debugLog('- Network exists: ' + (network ? 'YES' : 'NO'));
+                    if (network && network.body && network.body.data) {
+                        debugLog('- Nodes in network: ' + network.body.data.nodes.length);
+                        debugLog('- Edges in network: ' + network.body.data.edges.length);
+                        
+                        // Check node positions
+                        const nodePositions = network.getPositions();
+                        debugLog('- Node positions: ' + JSON.stringify(nodePositions));
+                        
+                        // Check if nodes are visible
+                        const allNodes = network.body.data.nodes.get();
+                        debugLog('- Node data: ' + JSON.stringify(allNodes.map(n => ({id: n.id, label: n.label}))));
+                        
+                        // Try to fit the network
+                        debugLog('- Fitting network to view...');
+                        network.fit();
+                    }
+                }, 2000);
+
+                // Add event listeners
+                network.on("selectNode", function (params) {
+                    if (params.nodes.length > 0) {
+                        const nodeId = params.nodes[0];
+                        showNodeInfo(nodeId);
+                    }
+                });
+
+                network.on("deselectNode", function () {
+                    document.getElementById('selectedInfo').innerHTML = `
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle"></i> Click on a node to see details
+                        </div>
+                    `;
+                });
+
+                // Update stats
+                updateStats(data.stats);
+
+                // Reset selection info to default state after successful load
+                document.getElementById('selectedInfo').innerHTML = `
+                    <div class="alert alert-info">
+                        <i class="fas fa-mouse-pointer"></i> Click on a node to see details
+                    </div>
+                `;
+                debugLog('Selection info reset to default state');
+
+            } catch (error) {
+                debugLog('ERROR in initNetwork: ' + error.message);
+                debugLog('Error stack: ' + error.stack);
+                document.getElementById('selectedInfo').innerHTML = `
+                    <div class="alert alert-error">
+                        <i class="fas fa-exclamation-triangle"></i> Error loading graph: ${error.message}
+                        <br><small>Check debug panel for details</small>
+                    </div>
+                `;
+            }
+        }
+
+        function showNodeInfo(nodeId) {
+            const nodeData = network.body.data.nodes.get(nodeId);
+            if (nodeData) {
+                // Get connected nodes and their relationships
+                const connectedNodes = network.getConnectedNodes(nodeId);
+                const connectedEdges = network.getConnectedEdges(nodeId);
+                
+                // Build connections info
+                let connectionsHtml = '';
+                if (connectedNodes.length > 0) {
+                    connectionsHtml = '<div class="detail-section"><h5>Connected To:</h5>';
+                    connectedNodes.forEach(connectedId => {
+                        const connectedNode = network.body.data.nodes.get(connectedId);
+                        const edge = network.body.data.edges.get(connectedEdges.find(edgeId => {
+                            const edgeData = network.body.data.edges.get(edgeId);
+                            return (edgeData.from === nodeId && edgeData.to === connectedId) || 
+                                   (edgeData.to === nodeId && edgeData.from === connectedId);
+                        }));
+                        
+                        connectionsHtml += `
+                            <div class="connection-item">
+                                <span class="connection-node">${connectedNode.label}</span>
+                                <span class="connection-type">(${edge ? edge.label : 'unknown'})</span>
+                            </div>
+                        `;
+                    });
+                    connectionsHtml += '</div>';
+                }
+                
+                // Build observations info
+                let observationsHtml = '';
+                if (nodeData.observations && nodeData.observations.length > 0) {
+                    observationsHtml = '<div class="detail-section"><h5>Observations:</h5>';
+                    nodeData.observations.forEach((obs, index) => {
+                        observationsHtml += `
+                            <div class="observation-item">
+                                <span class="observation-number">${index + 1}.</span>
+                                <span class="observation-text">${obs}</span>
+                            </div>
+                        `;
+                    });
+                    observationsHtml += '</div>';
+                }
+                
+                const info = `
+                    <div class="node-details">
+                        <h4><i class="fas fa-circle"></i> ${nodeData.label}</h4>
+                        <div class="detail-item">
+                            <span class="detail-label">Type:</span>
+                            <span class="detail-value">${nodeData.title.split('\n')[0].replace('Type: ', '')}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Connections:</span>
+                            <span class="detail-value">${connectedNodes.length}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Observations:</span>
+                            <span class="detail-value">${nodeData.observations ? nodeData.observations.length : 0}</span>
+                        </div>
+                        ${connectionsHtml}
+                        ${observationsHtml}
+                    </div>
+                `;
+                document.getElementById('selectedInfo').innerHTML = info;
+            }
+        }
+
+        function updateStats(stats) {
+            document.getElementById('networkStats').innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-number">${stats.total_nodes}</div>
+                    <div class="stat-label">Entities</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${stats.total_edges}</div>
+                    <div class="stat-label">Relations</div>
+                </div>
+            `;
+        }
+
+        function getNodeColor(type) {
+            const colors = {
+                'named_entity': '#FF6B6B',
+                'person': '#4ECDC4', 
+                'company': '#45B7D1',
+                'location': '#96CEB4',
+                'concept': '#FFEAA7',
+                'technical_term': '#DDA0DD',
+                'email': '#98D8C8',
+                'url': '#A29BFE',
+                'measurement': '#FD79A8',
+                'date': '#FDCB6E'
+            };
+            return colors[type] || '#95A5A6';
+        }
+
+        function refreshGraph() {
+            initNetwork(currentBank);
+        }
+
+        // Handle browser back/forward
+        window.addEventListener('popstate', function(event) {
+            if (event.state && event.state.bank) {
+                document.getElementById('bankSelect').value = event.state.bank;
+                initNetwork(event.state.bank);
+            }
+        });
+    </script>
+</body>
+</html>

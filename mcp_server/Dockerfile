@@ -20,6 +20,7 @@ RUN pip install --upgrade pip --disable-pip-version-check --no-warn-script-locat
 
 # Copy application files and set ownership
 COPY main.py ./
+COPY templates/ ./templates/
 RUN chown -R appuser:appuser /app
 
 # Switch to non-root user
