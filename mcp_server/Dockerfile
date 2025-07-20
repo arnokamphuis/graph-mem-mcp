@@ -23,7 +23,8 @@ RUN pip install --upgrade pip --disable-pip-version-check --no-warn-script-locat
 
 # Copy application files and set ownership
 COPY main.py ./
-COPY enhanced_kg_construction_improved.py ./
+COPY knowledge_graph_processor.py ./
+COPY enhanced_knowledge_processor.py ./
 COPY templates/ ./templates/
 RUN chown -R appuser:appuser /app
 

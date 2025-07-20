@@ -17,6 +17,28 @@ from pathlib import Path
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
+# Modern Knowledge Graph Processing
+try:
+    from knowledge_graph_processor import create_knowledge_graph_processor
+    kg_processor = create_knowledge_graph_processor()
+    MODERN_KG_AVAILABLE = True
+    logger.info("Modern knowledge graph processor loaded successfully")
+except ImportError as e:
+    logger.warning(f"Modern KG processor not available: {e}")
+    MODERN_KG_AVAILABLE = False
+    kg_processor = None
+
+# Enhanced Knowledge Graph Processing
+try:
+    from enhanced_knowledge_processor import create_enhanced_knowledge_graph_processor
+    enhanced_kg_processor = create_enhanced_knowledge_graph_processor()
+    ENHANCED_KG_AVAILABLE = True
+    logger.info("Enhanced knowledge graph processor loaded successfully")
+except ImportError as e:
+    logger.warning(f"Enhanced KG processor not available: {e}")
+    ENHANCED_KG_AVAILABLE = False
+    enhanced_kg_processor = None
+
 app = FastAPI()
 
 # Data persistence configuration
@@ -983,144 +1005,150 @@ async def root():
     # Render the enhanced visualization page
     return visualize_graph(default_bank)
 
-# Enhanced knowledge graph construction
-try:
-    from enhanced_kg_construction_improved import EnhancedKGConstructor
-    kg_constructor = EnhancedKGConstructor()
-    ENHANCED_KG_AVAILABLE = True
-except ImportError as e:
-    logger.warning(f"Enhanced KG construction not available: {e}")
-    ENHANCED_KG_AVAILABLE = False
-    kg_constructor = None
-
 # New endpoint: ingest long text and update/extend graph in a specific bank
 
 @app.post("/context/ingest")
 def ingest_context(payload: TextIngest = Body(...)):
     """
-    Ingest a long piece of text and update/extend the graph in the selected or specified bank.
-    Uses enhanced NLP-based knowledge graph construction if available, falls back to basic method.
+    Ingest text using modern NLP-based knowledge graph construction.
+    Uses spaCy for NER, dependency parsing, and sentence transformers for embeddings.
     Request body: {"text": "...", "bank": "bank_name"}
-    Response: {"status": "success", "entities": [...], "edges_added": N, "bank": "bank_name"}
+    Response: {"status": "success", "entities": [...], "relationships": [...], "bank": "bank_name"}
     """
     text = payload.text
     b = payload.bank or current_bank
     
-    if ENHANCED_KG_AVAILABLE and kg_constructor:
+    if MODERN_KG_AVAILABLE and kg_processor:
         try:
-            # Use enhanced knowledge graph construction
-            result = enhanced_ingest_context(text, b)
-            return result
-        except Exception as e:
-            logger.error(f"Enhanced KG construction failed: {e}, falling back to basic method")
-    
-    # Fallback to original simple method
-    # Simple entity extraction: words starting with capital letters (as example)
-    entities = set(re.findall(r'\b[A-Z][a-zA-Z0-9_]+\b', text))
-    # Add entities as nodes
-    for ent in entities:
-        if ent not in memory_banks[b]["nodes"]:
-            node = Node(id=ent, data={"from_text": True})
-            memory_banks[b]["nodes"][ent] = node
-    # Simple relationship extraction: pairs of entities in the same sentence
-    sentences = re.split(r'[.!?]', text)
-    for sentence in sentences:
-        ents_in_sentence = [ent for ent in entities if ent in sentence]
-        for i in range(len(ents_in_sentence)-1):
-            edge = Edge(source=ents_in_sentence[i], target=ents_in_sentence[i+1], data={"from_text": True})
-            memory_banks[b]["edges"].append(edge)
-    save_memory_banks()  # Persist the changes
-    return {"status": "success", "entities": list(entities), "edges_added": len(memory_banks[b]["edges"]), "bank": b}
-
-def enhanced_ingest_context(text: str, bank: str) -> dict:
-    """
-    Enhanced knowledge graph construction using advanced NLP techniques
-    """
-    # Get existing observations to link with new concepts
-    existing_observations = [obs.content for obs in memory_banks[bank]["observations"]]
-    
-    # Construct knowledge graph using enhanced method
-    kg_result = kg_constructor.construct_knowledge_graph(text, existing_observations)
-    
-    concepts = kg_result['concepts']
-    relationships = kg_result['relationships'] 
-    observation_links = kg_result['observation_links']
-    stats = kg_result['stats']
-    
-    # Add concepts as nodes
-    entities_added = []
-    for concept in concepts:
-        if concept.id not in memory_banks[bank]["nodes"]:
-            node_data = {
-                "name": concept.name,
-                "type": concept.type,
-                "aliases": concept.aliases,
-                "confidence": concept.confidence,
-                "from_enhanced_kg": True
+            # Use modern knowledge graph processor
+            existing_entity_names = list(memory_banks[b]["nodes"].keys())
+            kg_result = kg_processor.construct_knowledge_graph(text, existing_entity_names)
+            
+            entities = kg_result['entities']
+            relationships = kg_result['relationships']
+            stats = kg_result['stats']
+            
+            # Add entities as nodes
+            entities_added = 0
+            for entity in entities:
+                if entity.name not in memory_banks[b]["nodes"]:
+                    node_data = {
+                        "name": entity.name,
+                        "type": entity.entity_type,
+                        "confidence": entity.confidence,
+                        "aliases": list(entity.aliases),
+                        "mentions": entity.mentions,
+                        "from_modern_kg": True
+                    }
+                    node = Node(id=entity.name, data=node_data)
+                    memory_banks[b]["nodes"][entity.name] = node
+                    entities_added += 1
+                else:
+                    # Update existing node with new information
+                    existing_node = memory_banks[b]["nodes"][entity.name]
+                    if "aliases" not in existing_node.data:
+                        existing_node.data["aliases"] = []
+                    existing_node.data["aliases"].extend(entity.aliases)
+                    existing_node.data["aliases"] = list(set(existing_node.data["aliases"]))
+                    if "mentions" not in existing_node.data:
+                        existing_node.data["mentions"] = []
+                    existing_node.data["mentions"].extend(entity.mentions)
+            
+            # Add relationships as edges
+            relationships_added = 0
+            for rel in relationships:
+                # Ensure both entities exist
+                if rel.source in memory_banks[b]["nodes"] and rel.target in memory_banks[b]["nodes"]:
+                    # Check if relationship already exists
+                    existing_edge = None
+                    for edge in memory_banks[b]["edges"]:
+                        if (edge.source == rel.source and edge.target == rel.target and 
+                            edge.data.get("type") == rel.relation_type):
+                            existing_edge = edge
+                            break
+                    
+                    if not existing_edge:
+                        edge_data = {
+                            "type": rel.relation_type,
+                            "confidence": rel.confidence,
+                            "context": rel.context,
+                            "dependency_path": rel.dependency_path,
+                            "from_modern_kg": True
+                        }
+                        edge = Edge(source=rel.source, target=rel.target, data=edge_data)
+                        memory_banks[b]["edges"].append(edge)
+                        relationships_added += 1
+            
+            save_memory_banks()
+            
+            return {
+                "status": "success",
+                "method": "modern_nlp",
+                "entities_added": entities_added,
+                "total_entities": len(memory_banks[b]["nodes"]),
+                "relationships_added": relationships_added,
+                "total_relationships": len(memory_banks[b]["edges"]),
+                "bank": b,
+                "stats": stats
             }
-            node = Node(id=concept.id, data=node_data)
-            memory_banks[bank]["nodes"][concept.id] = node
-            entities_added.append(concept.id)
-        else:
-            # Update existing node with new information
-            existing_node = memory_banks[bank]["nodes"][concept.id]
-            if "aliases" not in existing_node.data:
-                existing_node.data["aliases"] = []
-            existing_node.data["aliases"].extend(concept.aliases)
-            existing_node.data["aliases"] = list(set(existing_node.data["aliases"]))  # Remove duplicates
+            
+        except Exception as e:
+            logger.error(f"Modern KG construction failed: {e}, falling back to basic method")
+    
+    # Fallback to basic method
+    logger.warning("Using basic fallback method for knowledge graph construction")
+    entities = extract_advanced_entities(text)
+    
+    # Add entities as nodes
+    for entity_name, entity_info in entities.items():
+        if entity_name not in memory_banks[b]["nodes"]:
+            node = Node(id=entity_name, data={
+                "type": entity_info["type"],
+                "confidence": entity_info["confidence"],
+                "from_text": True,
+                "extraction_method": "basic_fallback"
+            })
+            memory_banks[b]["nodes"][entity_name] = node
+    
+    # Extract relationships using fallback method
+    relationships = extract_relationships(text, entities)
     
     # Add relationships as edges
     edges_added = 0
     for rel in relationships:
+        if isinstance(rel, dict) and "from" in rel and "to" in rel:
+            source, target = rel["from"], rel["to"]
+            rel_type = rel.get("type", "related_to")
+        else:
+            continue
+            
         # Check if relationship already exists
         existing_edge = None
-        for edge in memory_banks[bank]["edges"]:
-            if (edge.source == rel.source and edge.target == rel.target and 
-                edge.data.get("relation_type") == rel.relation_type):
+        for edge in memory_banks[b]["edges"]:
+            if (edge.source == source and edge.target == target and 
+                edge.data.get("type") == rel_type):
                 existing_edge = edge
                 break
         
-        if not existing_edge:
+        if not existing_edge and source in memory_banks[b]["nodes"] and target in memory_banks[b]["nodes"]:
             edge_data = {
-                "relation_type": rel.relation_type,
-                "confidence": rel.confidence,
-                "context": rel.context,
-                "dependency_path": rel.dependency_path,
-                "from_enhanced_kg": True
+                "type": rel_type,
+                "confidence": rel.get("confidence", 0.5),
+                "from_text": True,
+                "extraction_method": "basic_fallback"
             }
-            edge = Edge(source=rel.source, target=rel.target, data=edge_data)
-            memory_banks[bank]["edges"].append(edge)
+            edge = Edge(source=source, target=target, data=edge_data)
+            memory_banks[b]["edges"].append(edge)
             edges_added += 1
     
-    # Link observations to concepts
-    observations_linked = 0
-    for concept_id, observations in observation_links.items():
-        for obs_text in observations:
-            # Create new observation or link existing one
-            obs_id = str(uuid.uuid4())
-            observation = Observation(
-                id=obs_id,
-                entity_id=concept_id,
-                content=obs_text,
-                timestamp=datetime.now().isoformat()
-            )
-            memory_banks[bank]["observations"].append(observation)
-            observations_linked += 1
-    
-    save_memory_banks()  # Persist the changes
-    
+    save_memory_banks()
     return {
-        "status": "success",
-        "method": "enhanced_nlp",
-        "entities_added": entities_added,
-        "total_entities": len(memory_banks[bank]["nodes"]),
-        "edges_added": edges_added,
-        "total_edges": len(memory_banks[bank]["edges"]),
-        "observations_linked": observations_linked,
-        "bank": bank,
-        "stats": stats
+        "status": "success", 
+        "method": "basic_fallback",
+        "entities": list(entities.keys()), 
+        "edges_added": edges_added, 
+        "bank": b
     }
-
 
 class KnowledgeIngest(BaseModel):
     text: str
@@ -2527,226 +2555,6 @@ def extract_relationships(text: str, entities: dict):
     return entities
 
 def extract_relationships(text: str, entities: dict):
-    """Extract relationships between entities with context, filtering out stop words"""
-    relationships = []
-    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
-    stop_words = {
-        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
-    }
-    
-    def is_valid_entity(entity_text):
-        """Check if entity should be included (not a stop word or too short)"""
-        entity_lower = entity_text.lower().strip()
-        return (len(entity_lower) > 2 and 
-                entity_lower not in stop_words and
-                not entity_lower.isdigit() and
-                len(entity_text.strip()) > 1)
-    
-    # 1. Named entities (capitalized sequences)
-    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
-    for entity in named_entities:
-        if is_valid_entity(entity):  # Use the validation function
-            entities[entity] = {"type": "named_entity", "confidence": 0.8}
-    
-    # 2. Technical terms (words with specific patterns)
-    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
-    for term in technical_terms:
-        if is_valid_entity(term):
-            entities[term] = {"type": "technical_term", "confidence": 0.7}
-    
-    # 3. Quoted concepts
-    quoted_concepts = re.findall(r'"([^"]*)"', text)
-    for concept in quoted_concepts:
-        if is_valid_entity(concept):
-            entities[concept] = {"type": "concept", "confidence": 0.9}
-    
-    # 4. Email addresses and URLs
-    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
-    for email in emails:
-        entities[email] = {"type": "email", "confidence": 1.0}
-    
-    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
-    for url in urls:
-        entities[url] = {"type": "url", "confidence": 1.0}
-    
-    # 5. Numbers and measurements
-    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
-    for measurement in measurements:
-        entities[measurement] = {"type": "measurement", "confidence": 0.8}
-    
-    # 6. Dates
-    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
-    for date in dates:
-        entities[date] = {"type": "date", "confidence": 0.9}
-    
-    return entities
-
-def extract_relationships(text: str, entities: dict):
-    """Extract relationships between entities with context, filtering out stop words"""
-    relationships = []
-    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
-    stop_words = {
-        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
-    }
-    
-    def is_valid_entity(entity_text):
-        """Check if entity should be included (not a stop word or too short)"""
-        entity_lower = entity_text.lower().strip()
-        return (len(entity_lower) > 2 and 
-                entity_lower not in stop_words and
-                not entity_lower.isdigit() and
-                len(entity_text.strip()) > 1)
-    
-    # 1. Named entities (capitalized sequences)
-    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
-    for entity in named_entities:
-        if is_valid_entity(entity):  # Use the validation function
-            entities[entity] = {"type": "named_entity", "confidence": 0.8}
-    
-    # 2. Technical terms (words with specific patterns)
-    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
-    for term in technical_terms:
-        if is_valid_entity(term):
-            entities[term] = {"type": "technical_term", "confidence": 0.7}
-    
-    # 3. Quoted concepts
-    quoted_concepts = re.findall(r'"([^"]*)"', text)
-    for concept in quoted_concepts:
-        if is_valid_entity(concept):
-            entities[concept] = {"type": "concept", "confidence": 0.9}
-    
-    # 4. Email addresses and URLs
-    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
-    for email in emails:
-        entities[email] = {"type": "email", "confidence": 1.0}
-    
-    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
-    for url in urls:
-        entities[url] = {"type": "url", "confidence": 1.0}
-    
-    # 5. Numbers and measurements
-    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
-    for measurement in measurements:
-        entities[measurement] = {"type": "measurement", "confidence": 0.8}
-    
-    # 6. Dates
-    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
-    for date in dates:
-        entities[date] = {"type": "date", "confidence": 0.9}
-    
-    return entities
-
-def extract_relationships(text: str, entities: dict):
-    """Extract relationships between entities with context, filtering out stop words"""
-    relationships = []
-    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
-    stop_words = {
-        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
-    }
-    
-    def is_valid_entity(entity_text):
-        """Check if entity should be included (not a stop word or too short)"""
-        entity_lower = entity_text.lower().strip()
-        return (len(entity_lower) > 2 and 
-                entity_lower not in stop_words and
-                not entity_lower.isdigit() and
-                len(entity_text.strip()) > 1)
-    
-    # 1. Named entities (capitalized sequences)
-    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
-    for entity in named_entities:
-        if is_valid_entity(entity):  # Use the validation function
-            entities[entity] = {"type": "named_entity", "confidence": 0.8}
-    
-    # 2. Technical terms (words with specific patterns)
-    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
-    for term in technical_terms:
-        if is_valid_entity(term):
-            entities[term] = {"type": "technical_term", "confidence": 0.7}
-    
-    # 3. Quoted concepts
-    quoted_concepts = re.findall(r'"([^"]*)"', text)
-    for concept in quoted_concepts:
-        if is_valid_entity(concept):
-            entities[concept] = {"type": "concept", "confidence": 0.9}
-    
-    # 4. Email addresses and URLs
-    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
-    for email in emails:
-        entities[email] = {"type": "email", "confidence": 1.0}
-    
-    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
-    for url in urls:
-        entities[url] = {"type": "url", "confidence": 1.0}
-    
-    # 5. Numbers and measurements
-    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
-    for measurement in measurements:
-        entities[measurement] = {"type": "measurement", "confidence": 0.8}
-    
-    # 6. Dates
-    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
-    for date in dates:
-        entities[date] = {"type": "date", "confidence": 0.9}
-    
-    return entities
-
-def extract_relationships(text: str, entities: dict):
-    """Extract relationships between entities with context, filtering out stop words"""
-    relationships = []
-    # Use the same stop_words and is_valid_entity as in extract_advanced_entities
-    stop_words = {
-        'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'among', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'a', 'an', 'as', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'will', 'can', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'whose', 'is', 'am', 'are', 'was', 'were', 'being', 'been', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'get', 'got', 'getting', 'give', 'gives', 'gave', 'given', 'giving', 'go', 'goes', 'went', 'gone', 'going', 'keep', 'keeps', 'kept', 'keeping', 'let', 'lets', 'letting', 'make', 'makes', 'made', 'making', 'put', 'puts', 'putting', 'say', 'says', 'said', 'saying', 'see', 'sees', 'saw', 'seen', 'seeing', 'take', 'takes', 'took', 'taken', 'taking', 'come', 'comes', 'came', 'coming', 'want', 'wants', 'wanted', 'wanting', 'look', 'looks', 'looked', 'looking', 'use', 'uses', 'used', 'using', 'find', 'finds', 'found', 'finding', 'work', 'works', 'worked', 'working', 'call', 'calls', 'called', 'calling', 'try', 'tries', 'tried', 'trying', 'ask', 'asks', 'asked', 'asking', 'need', 'needs', 'needed', 'needing', 'feel', 'feels', 'felt', 'feeling', 'become', 'becomes', 'became', 'becoming', 'leave', 'leaves', 'left', 'leaving', 'move', 'moves', 'moved', 'moving', 'live', 'lives', 'lived', 'living', 'believe', 'believes', 'believed', 'believing', 'hold', 'holds', 'held', 'holding', 'bring', 'brings', 'brought', 'bringing', 'happen', 'happens', 'happened', 'happening', 'write', 'writes', 'wrote', 'written', 'writing', 'provide', 'provides', 'provided', 'providing', 'sit', 'sits', 'sat', 'sitting', 'stand', 'stands', 'stood', 'standing', 'lose', 'loses', 'lost', 'losing', 'pay', 'pays', 'paid', 'paying', 'meet', 'meets', 'met', 'meeting', 'include', 'includes', 'included', 'including', 'continue', 'continues', 'continued', 'continuing', 'set', 'sets', 'setting', 'run', 'runs', 'ran', 'running', 'remember', 'remembers', 'remembered', 'remembering', 'lot', 'way', 'back', 'little', 'good', 'man', 'woman', 'day', 'time', 'year', 'right', 'may', 'new', 'old', 'great', 'high', 'small', 'large', 'national', 'young', 'different', 'long', 'important', 'public', 'bad', 'same', 'able'
-    }
-    
-    def is_valid_entity(entity_text):
-        """Check if entity should be included (not a stop word or too short)"""
-        entity_lower = entity_text.lower().strip()
-        return (len(entity_lower) > 2 and 
-                entity_lower not in stop_words and
-                not entity_lower.isdigit() and
-                len(entity_text.strip()) > 1)
-    
-    # 1. Named entities (capitalized sequences)
-    named_entities = re.findall(r'\b[A-Z][a-zA-Z0-9_]*(?:\s+[A-Z][a-zA-Z0-9_]*)*\b', text)
-    for entity in named_entities:
-        if is_valid_entity(entity):  # Use the validation function
-            entities[entity] = {"type": "named_entity", "confidence": 0.8}
-    
-    # 2. Technical terms (words with specific patterns)
-    technical_terms = re.findall(r'\b[a-z]+(?:[A-Z][a-z]*)+\b', text)  # camelCase
-    for term in technical_terms:
-        if is_valid_entity(term):
-            entities[term] = {"type": "technical_term", "confidence": 0.7}
-    
-    # 3. Quoted concepts
-    quoted_concepts = re.findall(r'"([^"]*)"', text)
-    for concept in quoted_concepts:
-        if is_valid_entity(concept):
-            entities[concept] = {"type": "concept", "confidence": 0.9}
-    
-    # 4. Email addresses and URLs
-    emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
-    for email in emails:
-        entities[email] = {"type": "email", "confidence": 1.0}
-    
-    urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', text)
-    for url in urls:
-        entities[url] = {"type": "url", "confidence": 1.0}
-    
-    # 5. Numbers and measurements
-    measurements = re.findall(r'\b\d+(?:\.\d+)?\s*(?:kg|km|m|cm|mm|lb|ft|in|%|dollars?|USD|\$)\b', text, re.IGNORECASE)
-    for measurement in measurements:
-        entities[measurement] = {"type": "measurement", "confidence": 0.8}
-    
-    # 6. Dates
-    dates = re.findall(r'\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b', text, re.IGNORECASE)
-    for date in dates:
-        entities[date] = {"type": "date", "confidence": 0.9}
-    
-    return entities
-
-def extract_relationships(text: str, entities: dict):
     """
     Extract semantically meaningful relationships between entities.
     
@@ -3018,15 +2826,15 @@ async def handle_mcp_stdio():
                                         },
                                         "auto_extract": {
                                             "type": "boolean", 
-                                            "description": "Whether to automatically extract additional entities and relationships from observation text (default: true)",
-                                            "default": True
+                                            "description": "Whether to automatically extract additional entities and relationships from observation text (default: false - observations should be descriptive)",
+                                            "default": False
                                         }
                                     }
                                 }
                             },
                             {
                                 "name": "add_observations",
-                                "description": "Add new observations to existing entities",
+                                "description": "Add new observations to existing entities. Observations are descriptive text and do NOT auto-extract entities/relationships.",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {
@@ -3091,6 +2899,20 @@ async def handle_mcp_stdio():
                                         "source": {"type": "string", "description": "Source identifier"},
                                         "extract_entities": {"type": "boolean", "description": "Extract entities"},
                                         "extract_relationships": {"type": "boolean", "description": "Extract relationships"},
+                                        "create_observations": {"type": "boolean", "description": "Create observations"}
+                                    },
+                                    "required": ["text"]
+                                }
+                            },
+                            {
+                                "name": "ingest_knowledge_enhanced",
+                                "description": "Create a high-quality knowledge graph using enhanced processing with LLM concepts, semantic clustering, and quality filtering",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "text": {"type": "string", "description": "Large text content to analyze"},
+                                        "bank": {"type": "string", "description": "Memory bank name"},
+                                        "source": {"type": "string", "description": "Source identifier"},
                                         "create_observations": {"type": "boolean", "description": "Create observations"}
                                     },
                                     "required": ["text"]
@@ -3247,7 +3069,7 @@ async def handle_mcp_stdio():
                 
                 if tool_name == "create_entities":
                     entities = arguments.get("entities", [])
-                    auto_extract = arguments.get("auto_extract", True)  # Default to True for smart extraction
+                    auto_extract = arguments.get("auto_extract", False)  # Keep False default - can be explicitly enabled if needed
                     created_entities = []
                     observations_added = 0
                     extracted_entities = {}
@@ -3352,7 +3174,7 @@ async def handle_mcp_stdio():
                     
                 elif tool_name == "add_observations":
                     observations = arguments.get("observations", [])
-                    auto_extract = arguments.get("auto_extract", True)  # Default to True for smart extraction
+                    auto_extract = False  # DISABLED: Observations should be descriptive text, not entity sources
                     added_count = 0
                     extracted_entities = {}
                     extracted_relationships = []
@@ -3522,7 +3344,27 @@ async def handle_mcp_stdio():
                     observations_created = 0
                     
                     if extract_entities:
-                        extracted_entities = extract_advanced_entities(text)
+                        # Use modern spaCy-based processor instead of old regex-based function
+                        entities_list, relationships_list = kg_processor.process_text(text)
+                        
+                        # Convert entities list to dictionary for compatibility
+                        extracted_entities = {}
+                        for entity in entities_list:
+                            extracted_entities[entity.name] = {
+                                "type": entity.entity_type,
+                                "confidence": entity.confidence
+                            }
+                        
+                        # Convert relationships list to list of dictionaries for compatibility
+                        extracted_relationships = []
+                        for rel in relationships_list:
+                            extracted_relationships.append({
+                                "from": rel.source,
+                                "to": rel.target,
+                                "type": rel.relation_type,
+                                "context": rel.context,
+                                "confidence": rel.confidence
+                            })
                         
                         for entity_name, entity_info in extracted_entities.items():
                             entity_id = entity_name.replace(" ", "_").lower()
@@ -3557,7 +3399,8 @@ async def handle_mcp_stdio():
                                     observations_created += 1
                         
                         if should_extract_relationships and extracted_entities:
-                            relationships = extract_relationships(text, extracted_entities)
+                            # Use relationships already extracted by modern processor
+                            relationships = extracted_relationships
                             
                             for rel in relationships:
                                 from_id = rel["from"].replace(" ", "_").lower()
@@ -3590,6 +3433,115 @@ async def handle_mcp_stdio():
                                 {
                                     "type": "text",
                                     "text": f"Knowledge graph created: {entities_created} entities, {relationships_created} relationships, {observations_created} observations from {len(text.split())} words of text"
+                                }
+                            ]
+                        }
+                    }
+                
+                elif tool_name == "ingest_knowledge_enhanced":
+                    # Enhanced knowledge ingestion with quality filtering
+                    text = arguments.get("text", "")
+                    bank = arguments.get("bank", current_bank)
+                    source = arguments.get("source", "text_input")
+                    create_observations = arguments.get("create_observations", True)
+                    
+                    if not ENHANCED_KG_AVAILABLE:
+                        response = {
+                            "jsonrpc": "2.0",
+                            "id": request.get("id"),
+                            "error": {
+                                "code": -32000,
+                                "message": "Enhanced knowledge graph processor not available"
+                            }
+                        }
+                        continue
+                    
+                    # Process the knowledge ingestion with enhanced processor
+                    entities_created = 0
+                    relationships_created = 0
+                    observations_created = 0
+                    
+                    # Use enhanced spaCy-based processor
+                    entities_list, relationships_list = enhanced_kg_processor.process_text_enhanced(text)
+                    
+                    # Convert enhanced entities to our format
+                    for entity in entities_list:
+                        entity_id = entity.name.replace(" ", "_").lower()
+                        
+                        if entity_id not in memory_banks[bank]["nodes"]:
+                            node = Node(
+                                id=entity_id,
+                                data={
+                                    "name": entity.name,
+                                    "type": entity.entity_type,
+                                    "confidence": entity.confidence,
+                                    "importance_score": entity.importance_score,
+                                    "is_clustered": entity.is_clustered,
+                                    "cluster_id": entity.cluster_id,
+                                    "source": source,
+                                    "extracted_from": "enhanced_analysis",
+                                    "created_at": datetime.now().isoformat()
+                                }
+                            )
+                            memory_banks[bank]["nodes"][entity_id] = node
+                            entities_created += 1
+                        
+                        if create_observations:
+                            # Add context snippets as observations
+                            for context in entity.context_snippets[:2]:  # Limit to 2 contexts per entity
+                                obs = Observation(
+                                    id=str(uuid.uuid4()),
+                                    entity_id=entity_id,
+                                    content=f"Context: \"{context.strip()}\"",
+                                    timestamp=datetime.now().isoformat()
+                                )
+                                memory_banks[bank]["observations"].append(obs)
+                                observations_created += 1
+                            
+                            # Add mentions as observations
+                            for mention in entity.mentions[:2]:  # Limit to 2 mentions
+                                obs = Observation(
+                                    id=str(uuid.uuid4()),
+                                    entity_id=entity_id,
+                                    content=f"Mentioned as: \"{mention}\"",
+                                    timestamp=datetime.now().isoformat()
+                                )
+                                memory_banks[bank]["observations"].append(obs)
+                                observations_created += 1
+                    
+                    # Convert enhanced relationships to our format
+                    for rel in relationships_list:
+                        from_id = rel.source.replace(" ", "_").lower()
+                        to_id = rel.target.replace(" ", "_").lower()
+                        
+                        if from_id in memory_banks[bank]["nodes"] and to_id in memory_banks[bank]["nodes"]:
+                            edge = Edge(
+                                source=from_id,
+                                target=to_id,
+                                data={
+                                    "type": rel.relation_type,
+                                    "context": rel.context,
+                                    "confidence": rel.confidence,
+                                    "semantic_score": rel.semantic_score,
+                                    "source": source,
+                                    "extracted_from": "enhanced_analysis",
+                                    "created_at": datetime.now().isoformat()
+                                }
+                            )
+                            edge.id = f"{from_id}-{rel.relation_type}-{to_id}-{len(memory_banks[bank]['edges'])}"
+                            memory_banks[bank]["edges"].append(edge)
+                            relationships_created += 1
+                    
+                    save_memory_banks()
+                    
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Enhanced knowledge graph created: {entities_created} high-quality entities, {relationships_created} semantic relationships, {observations_created} observations from {len(text.split())} words of text"
                                 }
                             ]
                         }
