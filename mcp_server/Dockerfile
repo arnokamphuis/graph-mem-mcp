@@ -23,16 +23,15 @@ RUN pip install --upgrade pip --disable-pip-version-check --no-warn-script-locat
 
 # Copy application files and set ownership
 COPY main.py ./
-COPY enhanced_kg_construction.py ./
+COPY enhanced_kg_construction_improved.py ./
 COPY templates/ ./templates/
 RUN chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser
 
-# Set environment variables for model caching
+# Set environment variables for model caching (using HF_HOME instead of deprecated TRANSFORMERS_CACHE)
 ENV HF_HOME=/app/.cache/huggingface
-ENV TRANSFORMERS_CACHE=/app/.cache/huggingface/transformers
 ENV HF_DATASETS_CACHE=/app/.cache/huggingface/datasets
 
 EXPOSE 10642

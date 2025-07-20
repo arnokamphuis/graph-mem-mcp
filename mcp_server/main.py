@@ -985,7 +985,7 @@ async def root():
 
 # Enhanced knowledge graph construction
 try:
-    from enhanced_kg_construction import EnhancedKGConstructor
+    from enhanced_kg_construction_improved import EnhancedKGConstructor
     kg_constructor = EnhancedKGConstructor()
     ENHANCED_KG_AVAILABLE = True
 except ImportError as e:

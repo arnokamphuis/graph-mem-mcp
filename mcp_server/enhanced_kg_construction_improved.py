@@ -50,22 +50,19 @@ class EnhancedKGConstructor:
     """Advanced Knowledge Graph Constructor with Domain-Specific Relationships"""
     
     def __init__(self, model_name: str = "en_core_web_sm", 
-                 embedding_model: str = "all-MiniLM-L6-v2",
-                 domain: str = "general"):
+                 embedding_model: str = "all-MiniLM-L6-v2"):
         """
         Initialize the constructor
         
         Args:
             model_name: spaCy model name
             embedding_model: SentenceTransformer model name
-            domain: Domain for specialized relationship patterns (general, water_cycle, biology, etc.)
         """
         self.nlp = spacy.load(model_name)
         self.embedding_model = SentenceTransformer(embedding_model)
-        self.domain = domain
         
-        # Generic relationship patterns
-        self.base_relation_patterns = {
+        # Basic relationship patterns for text matching
+        self.relation_patterns = {
             'is_type_of': ['is', 'are', 'was', 'were', 'being', 'been', 'represents', 'constitutes'],
             'has_property': ['has', 'have', 'had', 'owns', 'contains', 'includes', 'exhibits', 'displays'],
             'located_in': ['in', 'at', 'located', 'based', 'situated', 'found in', 'occurs in'],
@@ -74,125 +71,6 @@ class EnhancedKGConstructor:
             'influences': ['influences', 'affects', 'impacts', 'modifies', 'alters', 'changes'],
             'enables': ['enables', 'allows', 'permits', 'facilitates', 'supports']
         }
-        
-        # Domain-specific relationship patterns
-        self.domain_patterns = self._get_domain_patterns(domain)
-        
-        # Combine base and domain patterns
-        self.relation_patterns = {**self.base_relation_patterns, **self.domain_patterns}
-        
-        # Domain-specific verb mappings for dependency parsing
-        self.domain_verb_mappings = self._get_domain_verb_mappings(domain)
-    
-    def _get_domain_patterns(self, domain: str) -> Dict[str, List[str]]:
-        """Get domain-specific relationship patterns"""
-        if domain == "water_cycle":
-            return {
-                'evaporates_from': ['evaporates from', 'evaporation from', 'vapor from', 'rises from'],
-                'flows_into': ['flows into', 'flows to', 'drains into', 'empties into', 'discharges into'],
-                'condenses_into': ['condenses into', 'condenses to', 'forms', 'creates'],
-                'precipitates_as': ['precipitates as', 'falls as', 'comes down as', 'occurs as'],
-                'infiltrates_into': ['infiltrates into', 'seeps into', 'percolates into', 'penetrates'],
-                'stores_in': ['stored in', 'held in', 'contained in', 'accumulated in'],
-                'transports_to': ['transports to', 'carries to', 'moves to', 'conveys to'],
-                'drives_process': ['drives', 'powers', 'fuels', 'energizes', 'initiates'],
-                'regulates': ['regulates', 'controls', 'governs', 'manages', 'moderates'],
-                'contributes_to': ['contributes to', 'adds to', 'supplies', 'provides'],
-                'depends_on': ['depends on', 'relies on', 'requires', 'needs'],
-                'results_from': ['results from', 'caused by', 'due to', 'because of'],
-                'transforms_into': ['transforms into', 'converts to', 'becomes', 'changes into'],
-                'cycles_through': ['cycles through', 'circulates through', 'moves through'],
-                'accumulates_in': ['accumulates in', 'builds up in', 'collects in', 'gathers in']
-            }
-        elif domain == "biology":
-            return {
-                'metabolizes': ['metabolizes', 'breaks down', 'processes', 'digests'],
-                'synthesizes': ['synthesizes', 'produces', 'manufactures', 'creates'],
-                'regulates': ['regulates', 'controls', 'modulates', 'manages'],
-                'secretes': ['secretes', 'releases', 'produces', 'excretes'],
-                'absorbs': ['absorbs', 'takes up', 'incorporates', 'assimilates'],
-                'transports': ['transports', 'carries', 'moves', 'conveys'],
-                'binds_to': ['binds to', 'attaches to', 'connects to', 'links to'],
-                'activates': ['activates', 'triggers', 'initiates', 'stimulates'],
-                'inhibits': ['inhibits', 'blocks', 'prevents', 'suppresses']
-            }
-        else:
-            return {}
-    
-    def _get_domain_verb_mappings(self, domain: str) -> Dict[str, str]:
-        """Get domain-specific verb to relationship mappings"""
-        if domain == "water_cycle":
-            return {
-                'evaporate': 'evaporates_from',
-                'evaporates': 'evaporates_from',
-                'flow': 'flows_into',
-                'flows': 'flows_into',
-                'drain': 'flows_into',
-                'drains': 'flows_into',
-                'condense': 'condenses_into',
-                'condenses': 'condenses_into',
-                'precipitate': 'precipitates_as',
-                'precipitates': 'precipitates_as',
-                'fall': 'precipitates_as',
-                'falls': 'precipitates_as',
-                'infiltrate': 'infiltrates_into',
-                'infiltrates': 'infiltrates_into',
-                'seep': 'infiltrates_into',
-                'seeps': 'infiltrates_into',
-                'percolate': 'infiltrates_into',
-                'percolates': 'infiltrates_into',
-                'store': 'stores_in',
-                'stores': 'stores_in',
-                'contain': 'stores_in',
-                'contains': 'stores_in',
-                'transport': 'transports_to',
-                'transports': 'transports_to',
-                'carry': 'transports_to',
-                'carries': 'transports_to',
-                'drive': 'drives_process',
-                'drives': 'drives_process',
-                'power': 'drives_process',
-                'powers': 'drives_process',
-                'regulate': 'regulates',
-                'regulates': 'regulates',
-                'control': 'regulates',
-                'controls': 'regulates',
-                'contribute': 'contributes_to',
-                'contributes': 'contributes_to',
-                'supply': 'contributes_to',
-                'supplies': 'contributes_to',
-                'transform': 'transforms_into',
-                'transforms': 'transforms_into',
-                'convert': 'transforms_into',
-                'converts': 'transforms_into',
-                'cycle': 'cycles_through',
-                'cycles': 'cycles_through',
-                'circulate': 'cycles_through',
-                'circulates': 'cycles_through',
-                'accumulate': 'accumulates_in',
-                'accumulates': 'accumulates_in',
-                'collect': 'accumulates_in',
-                'collects': 'accumulates_in'
-            }
-        elif domain == "biology":
-            return {
-                'metabolize': 'metabolizes',
-                'metabolizes': 'metabolizes',
-                'synthesize': 'synthesizes',
-                'synthesizes': 'synthesizes',
-                'secrete': 'secretes',
-                'secretes': 'secretes',
-                'absorb': 'absorbs',
-                'absorbs': 'absorbs',
-                'bind': 'binds_to',
-                'binds': 'binds_to',
-                'activate': 'activates',
-                'activates': 'activates',
-                'inhibit': 'inhibits',
-                'inhibits': 'inhibits'
-            }
-        else:
-            return {}
     
     def extract_concepts(self, text: str) -> List[ConceptNode]:
         """
@@ -435,36 +313,120 @@ class EnhancedKGConstructor:
         return None
     
     def _classify_relationship_from_path(self, path):
-        """Classify relationship type based on dependency path with domain-specific mappings"""
+        """Classify relationship type based on dependency path using semantic analysis"""
         if not path:
-            return None
+            return 'related_to'
         
-        # Find verbs in the dependency path
+        # Find verbs and prepositions in the dependency path
         verbs_in_path = [token for token in path if token.pos_ == 'VERB']
+        prepositions = [token for token in path if token.pos_ == 'ADP']
+        
         if verbs_in_path:
-            verb = verbs_in_path[0].lemma_.lower()
+            verb = verbs_in_path[0]
+            verb_lemma = verb.lemma_.lower()
             
-            # Check domain-specific verb mappings first
-            if verb in self.domain_verb_mappings:
-                return self.domain_verb_mappings[verb]
-            
-            # Fall back to generic verb classification
-            if verb in ['be', 'is', 'are', 'was', 'were']:
-                return 'is_type_of'
-            elif verb in ['have', 'has', 'had', 'own']:
-                return 'has_property'
-            elif verb in ['work', 'employ']:
-                return 'works_for'
-            elif verb in ['create', 'make', 'develop']:
-                return 'created_by'
-            elif verb in ['cause', 'lead', 'result']:
-                return 'influences'
-            elif verb in ['enable', 'allow', 'permit']:
-                return 'enables'
-            else:
-                return 'related_to'
+            # Extract semantic relationship based on verb meaning and context
+            relationship_type = self._extract_semantic_relationship(verb, prepositions, path)
+            return relationship_type
+        
+        # If no verb, check for prepositions that indicate relationships
+        if prepositions:
+            prep = prepositions[0].text.lower()
+            if prep in ['in', 'within', 'inside']:
+                return 'located_in'
+            elif prep in ['from', 'out_of']:
+                return 'originates_from'
+            elif prep in ['to', 'into', 'toward']:
+                return 'leads_to'
+            elif prep in ['through', 'via']:
+                return 'passes_through'
+            elif prep in ['with', 'alongside']:
+                return 'associated_with'
+            elif prep in ['by', 'using']:
+                return 'performed_by'
         
         return 'related_to'
+    
+    def _extract_semantic_relationship(self, verb, prepositions, path):
+        """Extract semantic relationship type based on verb and context"""
+        verb_lemma = verb.lemma_.lower()
+        verb_text = verb.text.lower()
+        
+        # Analyze the verb's semantic meaning to determine relationship type
+        
+        # Movement and flow relationships
+        if verb_lemma in ['flow', 'move', 'travel', 'go', 'pass', 'run', 'drain', 'empty']:
+            if any(p.text.lower() in ['into', 'to'] for p in prepositions):
+                return 'flows_into'
+            elif any(p.text.lower() in ['from', 'out'] for p in prepositions):
+                return 'flows_from'
+            else:
+                return 'moves_through'
+        
+        # Transformation relationships
+        elif verb_lemma in ['transform', 'change', 'convert', 'become', 'turn', 'evolve']:
+            return 'transforms_into'
+        
+        # Creation and production relationships
+        elif verb_lemma in ['create', 'produce', 'generate', 'make', 'form', 'build', 'develop']:
+            return 'creates'
+        
+        # Causation relationships
+        elif verb_lemma in ['cause', 'lead', 'result', 'trigger', 'induce', 'bring']:
+            return 'causes'
+        
+        # Process relationships
+        elif verb_lemma in ['evaporate', 'condense', 'precipitate', 'freeze', 'melt']:
+            return f'{verb_lemma}s_into'
+        
+        # Control and regulation relationships
+        elif verb_lemma in ['control', 'regulate', 'manage', 'govern', 'moderate']:
+            return 'regulates'
+        
+        # Support and enable relationships
+        elif verb_lemma in ['support', 'enable', 'allow', 'permit', 'facilitate', 'help']:
+            return 'enables'
+        
+        # Influence relationships
+        elif verb_lemma in ['influence', 'affect', 'impact', 'modify', 'alter']:
+            return 'influences'
+        
+        # Containment relationships
+        elif verb_lemma in ['contain', 'hold', 'store', 'keep', 'house']:
+            return 'contains'
+        
+        # Transportation relationships
+        elif verb_lemma in ['transport', 'carry', 'convey', 'deliver', 'transfer']:
+            return 'transports'
+        
+        # Dependency relationships
+        elif verb_lemma in ['depend', 'rely', 'require', 'need']:
+            return 'depends_on'
+        
+        # Being/existence relationships
+        elif verb_lemma in ['be', 'is', 'are', 'was', 'were', 'exist', 'represent']:
+            # Check for different types of "being" relationships
+            if any(token.text.lower() in ['type', 'kind', 'form', 'example'] for token in path):
+                return 'is_type_of'
+            elif any(token.text.lower() in ['part', 'component', 'element'] for token in path):
+                return 'part_of'
+            else:
+                return 'is'
+        
+        # Possession relationships
+        elif verb_lemma in ['have', 'has', 'had', 'own', 'possess', 'include']:
+            return 'has'
+        
+        # Work/employment relationships
+        elif verb_lemma in ['work', 'employ', 'serve']:
+            return 'works_for'
+        
+        # Use context to create more specific relationship types
+        # Look for domain-specific verbs and create appropriate relationships
+        else:
+            # For unknown verbs, create a relationship type based on the verb itself
+            # This allows the system to adapt to any domain dynamically
+            return f'{verb_lemma}s'
     
     def _normalize_concept_name(self, name: str) -> str:
         """Normalize concept name for consistent IDs"""
