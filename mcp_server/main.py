@@ -107,8 +107,8 @@ def serialize_memory_banks():
             nodes_dict = {}
             for node_id, node in bank_data["nodes"].items():
                 try:
-                    # Try model_dump first, fallback to dict
-                    nodes_dict[node_id] = node.model_dump() if hasattr(node, 'model_dump') else node.dict()
+                    # Use model_dump for Pydantic v2 compatibility
+                    nodes_dict[node_id] = node.model_dump()
                 except Exception:
                     # If that fails, create manual dict
                     nodes_dict[node_id] = {
@@ -319,7 +319,7 @@ def add_entity(node: Node = Body(...), bank: str = Query(None)):
     b = bank or current_bank
     try:
         if not isinstance(node, Node):
-            node = Node(**node.dict() if hasattr(node, 'dict') else node)
+            node = Node(**node.model_dump() if hasattr(node, 'model_dump') else node)
         memory_banks[b]["nodes"][node.id] = node
         save_memory_banks()  # Persist the change
         return {"status": "success", "entity": node, "bank": b}
@@ -335,7 +335,7 @@ def get_entities(bank: str = Query(None)):
     Response: List of Node dicts
     """
     b = bank or current_bank
-    return [n.dict() for n in memory_banks[b]["nodes"].values()]
+    return [n.model_dump() for n in memory_banks[b]["nodes"].values()]
 
 
 @app.put("/entities/{entity_id}")
@@ -378,7 +378,7 @@ def add_relation(edge: Edge = Body(...), bank: str = Query(None)):
     try:
         edge.id = edge.id or f"{edge.source}-{edge.target}-{len(memory_banks[b]['edges'])}"
         if not isinstance(edge, Edge):
-            edge = Edge(**edge.dict() if hasattr(edge, 'dict') else edge)
+            edge = Edge(**edge.model_dump() if hasattr(edge, 'model_dump') else edge)
         memory_banks[b]["edges"].append(edge)
         save_memory_banks()  # Persist the change
         return {"status": "success", "relation": edge, "bank": b}
@@ -394,7 +394,7 @@ def get_relations(bank: str = Query(None)):
     Response: List of Edge dicts
     """
     b = bank or current_bank
-    return [e.dict() for e in memory_banks[b]["edges"]]
+    return [e.model_dump() for e in memory_banks[b]["edges"]]
 
 
 @app.put("/relations/{relation_id}")
@@ -440,7 +440,7 @@ def add_observation(obs: Observation = Body(...), bank: str = Query(None)):
     b = bank or current_bank
     try:
         if not isinstance(obs, Observation):
-            obs = Observation(**obs.dict() if hasattr(obs, 'dict') else obs)
+            obs = Observation(**obs.model_dump() if hasattr(obs, 'model_dump') else obs)
         memory_banks[b]["observations"].append(obs)
         save_memory_banks()  # Persist the change
         return {"status": "success", "observation": obs, "bank": b}
@@ -456,7 +456,7 @@ def get_observations(bank: str = Query(None)):
     Response: List of Observation dicts
     """
     b = bank or current_bank
-    return [o.dict() for o in memory_banks[b]["observations"]]
+    return [o.model_dump() for o in memory_banks[b]["observations"]]
 
 # Bank-aware sequential thinking endpoints
 
@@ -471,7 +471,7 @@ def add_reasoning_step(step: ReasoningStep = Body(...), bank: str = Query(None))
     b = bank or current_bank
     try:
         if not isinstance(step, ReasoningStep):
-            step = ReasoningStep(**step.dict() if hasattr(step, 'dict') else step)
+            step = ReasoningStep(**step.model_dump() if hasattr(step, 'model_dump') else step)
         memory_banks[b]["reasoning_steps"].append(step)
         save_memory_banks()  # Persist the change
         return {"status": "success", "step": step, "bank": b}
@@ -487,7 +487,7 @@ def get_reasoning_steps(bank: str = Query(None)):
     Response: List of ReasoningStep dicts
     """
     b = bank or current_bank
-    return [s.dict() for s in memory_banks[b]["reasoning_steps"]]
+    return [s.model_dump() for s in memory_banks[b]["reasoning_steps"]]
 
 
 # Search Helper Functions
@@ -3355,7 +3355,7 @@ async def handle_mcp_stdio():
                         )
                         edge.id = f"{edge.source}-{edge.target}-{len(memory_banks[current_bank]['edges'])}"
                         memory_banks[current_bank]["edges"].append(edge)
-                        created_relations.append(edge.dict())
+                        created_relations.append(edge.model_dump())
                     save_memory_banks()
                     
                     response = {
