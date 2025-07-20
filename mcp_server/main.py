@@ -921,11 +921,13 @@ def get_visualizations(bank: str = Query(None)):
     
     # Convert relationships to visualization edges
     for edge in memory_banks[b]["edges"]:
+        # Try relation_type first (from enhanced KG), fall back to type, then default
+        relation_type = edge.data.get("relation_type") or edge.data.get("type", "related_to")
         edges.append({
             "source": edge.source,
             "target": edge.target,
-            "type": edge.data.get("type", "related_to"),
-            "label": edge.data.get("type", "related_to")
+            "type": relation_type,
+            "label": relation_type
         })
     
     return {
