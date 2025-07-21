@@ -778,10 +778,11 @@ class EnhancedEntityExtractor:
             try:
                 # Create EntityInstance compatible with Phase 1 schema system
                 # Handle both Pydantic and dataclass fallback modes
-                entity = EntityInstance()
+                entity = EntityInstance(
+                    name=candidate.text,  # Entity name is the extracted text
+                    entity_type=candidate.entity_type
+                )
                 entity.id = f"extracted_{candidate.start_pos}_{candidate.end_pos}"
-                entity.name = candidate.text  # Entity name is the extracted text
-                entity.entity_type = candidate.entity_type
                 entity.confidence = candidate.confidence
                 entity.properties = {
                     'extraction_strategy': candidate.strategy.value,
@@ -830,7 +831,7 @@ class EnhancedEntityExtractor:
                 canonical_candidate = cluster.canonical_entity
                 
                 entity = EntityInstance(
-                    entity_id=f"resolved_{cluster.cluster_id}",
+                    name=canonical_candidate.text,
                     entity_type=canonical_candidate.entity_type,
                     properties={
                         **canonical_candidate.properties,
@@ -840,6 +841,7 @@ class EnhancedEntityExtractor:
                         'aliases': [e.text for e in cluster.entities if e.text != canonical_candidate.text]
                     }
                 )
+                entity.id = f"resolved_{cluster.cluster_id}"
                 resolved_entities.append(entity)
             
             self.logger.info(f"🔗 Entity resolution: {len(entities)} → {len(resolved_entities)} entities")
