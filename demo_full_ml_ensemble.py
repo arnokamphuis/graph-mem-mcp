@@ -52,12 +52,12 @@ def schema_guided_extraction(text: str, schema: dict) -> List[EntityResult]:
                 context=text[max(0, match.start()-30):match.end()+30]
             ))
     
-    # Organization patterns
+    # Organization patterns - Fixed to avoid capturing full sentences
     org_patterns = [
         r'(MIT|Stanford University|Google|Microsoft|Apple|Cambridge University)',
         r'([A-Z][a-zA-Z]+\s+Inc\.)',
         r'(National Science Foundation)',
-        r'([A-Z][a-zA-Z\s]+Conference)'
+        r'\b([A-Z][a-zA-Z\s]*Conference(?:\s+on\s+[A-Z][a-zA-Z\s]+)?)\b'  # Fixed pattern with word boundaries
     ]
     
     for pattern in org_patterns:
@@ -115,30 +115,65 @@ def pattern_based_extraction(text: str) -> List[EntityResult]:
     return entities
 
 def contextual_extraction(text: str) -> List[EntityResult]:
-    """Extract entities using contextual clues"""
+    """Extract entities using contextual clues - IMPROVED VERSION"""
     entities = []
     
-    # Context-based patterns
+    # Enhanced context-based patterns with proper boundaries
     contexts = [
-        (r'funded by ([A-Z][a-zA-Z\s]+?)(?:,|\sand)', 'organization', 'funding_context'),
-        (r'acquired by ([A-Z][a-zA-Z\s]+)', 'organization', 'acquisition_context'),
-        (r'worked in ([A-Z][a-zA-Z\s]+?)(?:,|\sand)', 'location', 'work_location'),
-        (r'presented at.*?([A-Z][a-zA-Z\s]+Conference)', 'event', 'presentation_context')
+        # Fixed: Better boundary detection to avoid "Apple for" issue
+        (r'funded by ([A-Z][a-zA-Z\s]+?)(?:\s+(?:and|,|with|\.|$))', 'organization', 'funding_context'),
+        (r'acquired by ([A-Z][a-zA-Z\s]+?)(?:\s+(?:for|in|with|\.|$))', 'organization', 'acquisition_context'),
+        (r'worked in ([A-Z][a-zA-Z\s]+?)(?:\s*,|\s+and|\s*$)', 'location', 'work_location'),
+        (r'presented at.*?([A-Z][a-zA-Z\s]+?Conference(?:\s+on\s+[A-Z][a-zA-Z\s]+)?)', 'event', 'presentation_context')
     ]
     
     for pattern, entity_type, context_type in contexts:
         for match in re.finditer(pattern, text):
             name = match.group(1).strip()
-            entities.append(EntityResult(
-                name=name,
-                entity_type=entity_type,
-                confidence=0.8,
-                extracted_by='contextual',
-                context=text[max(0, match.start()-30):match.end()+30],
-                attributes={'context_type': context_type}
-            ))
+            
+            # Clean up the extracted name - remove trailing prepositions
+            name = clean_extracted_name(name)
+            
+            if name and is_valid_contextual_entity(name, entity_type):
+                entities.append(EntityResult(
+                    name=name,
+                    entity_type=entity_type,
+                    confidence=0.8,
+                    extracted_by='contextual',
+                    context=text[max(0, match.start()-30):match.end()+30],
+                    attributes={'context_type': context_type}
+                ))
     
     return entities
+
+def clean_extracted_name(name: str) -> str:
+    """Clean up extracted entity names"""
+    # Remove trailing words that shouldn't be part of entity names
+    trailing_stopwords = ['for', 'and', 'or', 'the', 'of', 'in', 'at', 'by', 'with', 'from', 'to']
+    
+    words = name.split()
+    # Remove trailing stopwords
+    while words and words[-1].lower() in trailing_stopwords:
+        words.pop()
+    
+    return ' '.join(words).strip()
+
+def is_valid_contextual_entity(name: str, entity_type: str) -> bool:
+    """Validate contextually extracted entities"""
+    if not name or len(name) < 2:
+        return False
+    
+    # Don't allow single stopwords
+    if name.lower() in ['for', 'and', 'or', 'the', 'of', 'in', 'at', 'by', 'with', 'from', 'to']:
+        return False
+    
+    # Entity type specific validation
+    if entity_type == 'organization':
+        # Organizations shouldn't end with prepositions
+        if name.lower().endswith((' for', ' by', ' with', ' from', ' to', ' at', ' in')):
+            return False
+    
+    return True
 
 def transformer_ner_extraction(text: str) -> List[EntityResult]:
     """Extract entities using Transformers NER"""
@@ -217,7 +252,7 @@ def spacy_ner_extraction(text: str) -> List[EntityResult]:
         return []
 
 def ensemble_extraction(text: str) -> List[EntityResult]:
-    """Multi-model ensemble extraction"""
+    """Multi-model ensemble extraction with improved deduplication"""
     schema = create_mock_schema()
     
     print("🔧 Running Multi-Model Ensemble Extraction...")
@@ -244,20 +279,163 @@ def ensemble_extraction(text: str) -> List[EntityResult]:
     
     print(f"\n📊 Total raw entities: {len(all_entities)}")
     
-    # Simple deduplication based on name similarity
-    deduplicated = []
-    seen_names = set()
+    # Improved deduplication with substring/containment handling
+    deduplicated = advanced_deduplication(all_entities)
     
-    for entity in all_entities:
-        # Simple normalization
-        normalized_name = entity.name.lower().strip()
-        if normalized_name not in seen_names:
-            seen_names.add(normalized_name)
-            deduplicated.append(entity)
-    
-    print(f"📊 After deduplication: {len(deduplicated)} entities")
+    print(f"📊 After advanced deduplication: {len(deduplicated)} entities")
     
     return deduplicated
+
+def advanced_deduplication(entities: List[EntityResult]) -> List[EntityResult]:
+    """
+    Advanced deduplication that handles:
+    - Exact matches
+    - Substring containment (Sarah vs Sarah Johnson)
+    - Malformed extractions
+    - Entity type corrections
+    """
+    if not entities:
+        return []
+    
+    # Phase 1: Apply entity type corrections and filter invalid entities
+    corrected_entities = []
+    for entity in entities:
+        # Apply domain knowledge corrections
+        corrected_entity = correct_entity_type(entity)
+        
+        if is_valid_entity_name(corrected_entity.name):
+            corrected_entities.append(corrected_entity)
+        else:
+            print(f"  🗑️  Filtered invalid: '{entity.name}' (reason: {entity.extracted_by})")
+    
+    # Phase 2: Advanced deduplication
+    deduplicated = {}
+    
+    for entity in corrected_entities:
+        # Find if this entity should be merged with an existing one
+        merge_target = None
+        for existing_key, existing_entity in deduplicated.items():
+            if should_merge_entities(entity, existing_entity):
+                merge_target = existing_key
+                break
+        
+        if merge_target:
+            # Merge with existing entity
+            existing = deduplicated[merge_target]
+            merged = merge_two_entities(entity, existing)
+            deduplicated[merge_target] = merged
+        else:
+            # Add as new entity
+            key = (entity.name.lower().strip(), entity.entity_type)
+            deduplicated[key] = entity
+    
+    return list(deduplicated.values())
+
+def correct_entity_type(entity: EntityResult) -> EntityResult:
+    """Apply domain knowledge to correct obvious entity type misclassifications"""
+    name = entity.name.strip().lower()
+    
+    # Technology/AI terms that shouldn't be locations
+    tech_terms = ['ai', 'artificial intelligence', 'ml', 'machine learning', 'neural network']
+    
+    if name in tech_terms and entity.entity_type == 'location':
+        # Correct the entity type
+        corrected = EntityResult(
+            name=entity.name,
+            entity_type='technology',
+            confidence=entity.confidence * 0.9,  # Slight confidence reduction for correction
+            extracted_by=f"{entity.extracted_by}_corrected",
+            context=entity.context,
+            attributes={**(entity.attributes or {}), 'type_corrected': f"from_{entity.entity_type}_to_technology"}
+        )
+        return corrected
+    
+    return entity
+
+def is_valid_entity_name(name: str) -> bool:
+    """Check if an entity name is valid"""
+    if not name or len(name.strip()) < 2:
+        return False
+    
+    name = name.strip()
+    
+    # Check for sentence-like patterns (likely malformed extractions)
+    sentence_patterns = [
+        r'.*\s(was|were|is|are|has|have|had|will|would|could|should)\s.*',  # Contains verbs
+        r'.*\s(presented|acquired|developed|created|published)\s.*',  # Action verbs
+        r'.*\s(the|a|an)\s.*\s(the|a|an)\s.*',  # Multiple articles
+        r'^\s*[Tt]he\s.*\s(at|in|on|to|from|with|by)\s.*',  # Starts with "The" and has prepositions
+    ]
+    
+    for pattern in sentence_patterns:
+        if re.match(pattern, name, re.IGNORECASE):
+            return False
+    
+    # Check for malformed patterns
+    invalid_patterns = [
+        r'^(for|and|or|the|of|in|at|by|with|from|to)$',  # Single stopwords
+        r'.*\s+(for|and|or|the|of|in|at|by|with|from|to)\s*$',  # Ending with stopwords
+        r'^[^a-zA-Z]*$',  # No letters
+        r'^\W+$',  # Only punctuation
+    ]
+    
+    for pattern in invalid_patterns:
+        if re.match(pattern, name, re.IGNORECASE):
+            return False
+    
+    return True
+
+def should_merge_entities(entity1: EntityResult, entity2: EntityResult) -> bool:
+    """Determine if two entities should be merged"""
+    if entity1.entity_type != entity2.entity_type:
+        return False
+    
+    name1 = entity1.name.lower().strip()
+    name2 = entity2.name.lower().strip()
+    
+    # Exact match
+    if name1 == name2:
+        return True
+    
+    # Substring containment - handle "Sarah" vs "Sarah Johnson"
+    if name1 in name2 or name2 in name1:
+        # Only merge if one is substantially longer
+        min_len = min(len(name1), len(name2))
+        max_len = max(len(name1), len(name2))
+        if max_len - min_len >= 3:  # At least 3 character difference
+            return True
+    
+    return False
+
+def merge_two_entities(entity1: EntityResult, entity2: EntityResult) -> EntityResult:
+    """Merge two entities, keeping the better one"""
+    # Prefer the entity with higher confidence
+    if entity1.confidence > entity2.confidence:
+        primary, secondary = entity1, entity2
+    elif entity1.confidence < entity2.confidence:
+        primary, secondary = entity2, entity1
+    else:
+        # Same confidence - prefer longer name
+        if len(entity1.name) > len(entity2.name):
+            primary, secondary = entity1, entity2
+        else:
+            primary, secondary = entity2, entity1
+    
+    # Create merged entity
+    merged = EntityResult(
+        name=primary.name,
+        entity_type=primary.entity_type,
+        confidence=min(1.0, max(primary.confidence, secondary.confidence) + 0.05),  # Small boost
+        extracted_by=f"{primary.extracted_by}+{secondary.extracted_by}",
+        context=primary.context,
+        attributes={
+            **(primary.attributes or {}),
+            'merged_from': [primary.extracted_by, secondary.extracted_by],
+            'alternative_names': [secondary.name] if secondary.name != primary.name else []
+        }
+    )
+    
+    return merged
 
 def main():
     """Main demonstration function"""

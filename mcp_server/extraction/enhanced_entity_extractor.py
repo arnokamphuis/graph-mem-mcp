@@ -560,22 +560,46 @@ class EnhancedEntityExtractor:
         return None
     
     def _extract_contextual(self, context: ExtractionContext) -> List[ExtractionCandidate]:
-        """Extract entities using contextual clues"""
+        """
+        Extract entities using contextual clues and linguistic patterns
+        Implements sophisticated context-aware extraction per Phase 2.2 requirements
+        """
         candidates = []
         
-        # Contextual patterns that indicate entity types
+        # Enhanced contextual patterns with better boundary detection
         contextual_patterns = {
             "person": [
-                (r'(?:CEO|president|director|founder|manager)\s+([A-Z][a-z]+ [A-Z][a-z]+)', 1),
-                (r'([A-Z][a-z]+ [A-Z][a-z]+)\s+(?:said|founded|established|created)', 1),
+                # Professional titles and roles
+                (r'(?:CEO|president|director|founder|manager|professor|dr\.?)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)', 1),
+                (r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\s+(?:said|founded|established|created|announced)', 1),
+                (r'(?:by|from|with)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)(?:\s+(?:from|at|of))', 1),
+                # Academic titles
+                (r'(?:Prof\.?|Professor|Dr\.?)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)', 1),
             ],
             "organization": [
-                (r'(?:at|for|with)\s+([A-Z][a-zA-Z\s]+ (?:Inc|Corp|Corporation|Company)\.?)', 1),
-                (r'([A-Z][a-zA-Z\s]+)\s+(?:announced|reported|stated)', 1),
+                # Company/organization patterns with proper boundaries
+                (r'(?:at|for|with|by)\s+([A-Z][a-zA-Z\s]+?(?:\s+(?:Inc|Corp|Corporation|Company|University|Foundation|Institute)\.?))(?:\s|,|\.|\;|$)', 1),
+                (r'(?:funded\s+by|acquired\s+by|owned\s+by)\s+([A-Z][a-zA-Z\s]+?)(?:\s+(?:and|,)|$)', 1),
+                (r'([A-Z][a-zA-Z\s]+?(?:\s+(?:Inc|Corp|Corporation|Company|University)\.?))\s+(?:announced|reported|stated|said)', 1),
+                # Research institutions
+                (r'([A-Z][a-zA-Z\s]+?\s+(?:University|Institute|Foundation|Laboratory))\b', 1),
             ],
             "location": [
-                (r'(?:in|at|from)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)', 1),
-                (r'headquarters\s+in\s+([A-Z][a-z]+)', 1),
+                # Geographic locations with context
+                (r'(?:in|at|from|to)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*?)(?:\s*,|\s+and|\s*$)', 1),
+                (r'headquarters\s+(?:in|at)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)', 1),
+                (r'(?:located|based|situated)\s+in\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)', 1),
+                (r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*,\s*([A-Z][a-z]+)(?:\s|,|\.|\;|$)', 1),  # City, State/Country
+            ],
+            "event": [
+                # Conference and event patterns
+                (r'(?:at\s+the\s+|presented\s+at\s+)([A-Z][a-zA-Z\s]+?Conference(?:\s+on\s+[A-Z][a-zA-Z\s]+)?)', 1),
+                (r'([A-Z][a-zA-Z\s]+?(?:Conference|Summit|Symposium|Workshop))(?:\s+(?:in|at|on))', 1),
+            ],
+            "technology": [
+                # Technology and algorithm patterns
+                (r'(?:using|with|developed|created)\s+([A-Z][a-zA-Z\s]+?\s+(?:algorithm|technology|system|platform)s?)', 1),
+                (r'([A-Z][a-zA-Z]+)\s+(?:algorithm|technology|platform|system)', 1),
             ]
         }
         
@@ -589,7 +613,10 @@ class EnhancedEntityExtractor:
                         start_pos = match.start(group_idx)
                         end_pos = match.end(group_idx)
                         
-                        if self._is_valid_pattern_match(entity_text, entity_type):
+                        # Clean up extracted text
+                        entity_text = self._clean_contextual_extraction(entity_text, entity_type)
+                        
+                        if entity_text and self._is_valid_contextual_extraction(entity_text, entity_type, match.group()):
                             context_start = max(0, start_pos - 50)
                             context_end = min(len(context.text), end_pos + 50)
                             context_window = context.text[context_start:context_end]
@@ -597,47 +624,135 @@ class EnhancedEntityExtractor:
                             candidate = ExtractionCandidate(
                                 text=entity_text,
                                 start_pos=start_pos,
-                                end_pos=end_pos,
+                                end_pos=start_pos + len(entity_text),  # Adjust for cleaned text
                                 entity_type=entity_type,
-                                confidence=0.7,
+                                confidence=0.75,  # Higher confidence for contextual
                                 strategy=ExtractionStrategy.CONTEXTUAL,
                                 context_window=context_window,
-                                evidence=f"Context: {match.group()[:30]}...",
-                                properties={'context_clue': True}
+                                evidence=f"Context pattern: {match.group()[:40]}...",
+                                properties={
+                                    'context_clue': True,
+                                    'pattern_matched': pattern[:30],
+                                    'full_context': match.group()
+                                }
                             )
                             candidates.append(candidate)
         
         return candidates
     
+    def _clean_contextual_extraction(self, text: str, entity_type: str) -> str:
+        """Clean up contextually extracted entity text"""
+        # Remove common trailing words that shouldn't be part of entity names
+        trailing_stopwords = ['for', 'and', 'or', 'the', 'of', 'in', 'at', 'by', 'with', 'from', 'to']
+        
+        # Split and clean
+        words = text.split()
+        cleaned_words = []
+        
+        for word in words:
+            # Remove punctuation from end of words
+            clean_word = re.sub(r'[^\w\s\.\-]$', '', word)
+            if clean_word:
+                cleaned_words.append(clean_word)
+        
+        # Remove trailing stopwords
+        while cleaned_words and cleaned_words[-1].lower() in trailing_stopwords:
+            cleaned_words.pop()
+        
+        return ' '.join(cleaned_words).strip()
+    
+    def _is_valid_contextual_extraction(self, text: str, entity_type: str, full_match: str) -> bool:
+        """Validate contextually extracted entity"""
+        if not text or len(text) < 2:
+            return False
+        
+        # Check for common invalid patterns
+        invalid_patterns = [
+            r'^(for|and|or|the|of|in|at|by|with|from|to)$',
+            r'^\d+$',  # Only numbers
+            r'^[^\w\s]+$',  # Only punctuation
+        ]
+        
+        for pattern in invalid_patterns:
+            if re.match(pattern, text, re.IGNORECASE):
+                return False
+        
+        # Entity type specific validation
+        if entity_type == 'person':
+            # Person names should have at least two words or be a known title
+            if ' ' not in text and not text.startswith(('Dr.', 'Prof.', 'Mr.', 'Ms.', 'Mrs.')):
+                return False
+        
+        elif entity_type == 'organization':
+            # Organization names shouldn't be too short unless they're acronyms
+            if len(text) < 3 and not text.isupper():
+                return False
+            # Check for incomplete organization names
+            if text.lower().endswith((' for', ' by', ' with', ' from', ' to', ' at', ' in')):
+                return False
+        
+        elif entity_type == 'location':
+            # Locations should be proper nouns
+            if not re.match(r'^[A-Z]', text):
+                return False
+        
+        return True
+    
     def _merge_candidates(self, candidates: List[ExtractionCandidate], 
                          context: ExtractionContext) -> List[ExtractionCandidate]:
-        """Merge and deduplicate candidates from multiple strategies"""
+        """
+        Merge and deduplicate candidates from multiple strategies
+        Implements sophisticated deduplication per Phase 2.2 quality requirements
+        """
         if not candidates:
             return []
         
-        # Group candidates by text and position overlap
+        # Phase 1: Quality filtering - remove invalid extractions
+        valid_candidates = []
+        for candidate in candidates:
+            if self._is_valid_entity_extraction(candidate):
+                valid_candidates.append(candidate)
+            else:
+                self.logger.debug(f"🗑️  Filtered invalid extraction: '{candidate.text}'")
+        
+        if not valid_candidates:
+            return []
+        
+        # Phase 2: Advanced deduplication with substring/containment analysis
         merged = {}
         
-        for candidate in candidates:
-            # Create a key for grouping similar candidates
-            key = (candidate.text.lower().strip(), candidate.entity_type)
+        for candidate in valid_candidates:
+            # Normalize text for comparison
+            normalized_text = self._normalize_entity_text(candidate.text)
             
-            if key not in merged:
-                merged[key] = candidate
+            # Check for existing similar entities
+            merge_target = None
+            for existing_key, existing_candidate in merged.items():
+                if self._should_merge_entities(candidate, existing_candidate):
+                    merge_target = existing_key
+                    break
+            
+            if merge_target:
+                # Merge with existing entity - keep the better one
+                existing = merged[merge_target]
+                merged_candidate = self._merge_two_candidates(candidate, existing)
+                merged[merge_target] = merged_candidate
             else:
-                # Merge with existing candidate - take higher confidence
-                existing = merged[key]
-                if candidate.confidence > existing.confidence:
-                    # Keep the higher confidence candidate but merge evidence
-                    candidate.evidence = f"{existing.evidence}; {candidate.evidence}"
-                    candidate.properties.update(existing.properties)
-                    merged[key] = candidate
-                else:
-                    # Update existing with additional evidence
-                    existing.evidence = f"{existing.evidence}; {candidate.evidence}"
-                    existing.properties.update(candidate.properties)
+                # Create new entry
+                key = (normalized_text, candidate.entity_type)
+                merged[key] = candidate
         
-        return list(merged.values())
+        # Phase 3: Final validation and ranking
+        final_candidates = []
+        for candidate in merged.values():
+            if candidate.confidence >= context.confidence_threshold:
+                final_candidates.append(candidate)
+        
+        # Sort by confidence descending
+        final_candidates.sort(key=lambda x: x.confidence, reverse=True)
+        
+        self.logger.debug(f"📊 Deduplication: {len(candidates)} → {len(valid_candidates)} → {len(final_candidates)}")
+        return final_candidates
     
     def _candidates_to_entities(self, candidates: List[ExtractionCandidate], 
                                context: ExtractionContext) -> List[EntityInstance]:
@@ -718,6 +833,142 @@ class EnhancedEntityExtractor:
         except Exception as e:
             self.logger.warning(f"⚠️  Entity resolution failed: {e}")
             return entities  # Return original entities if resolution fails
+    
+    def _is_valid_entity_extraction(self, candidate: ExtractionCandidate) -> bool:
+        """
+        Validate if an extraction candidate is a proper entity
+        Implements quality filtering per Phase 2.2 requirements
+        """
+        text = candidate.text.strip()
+        
+        # Basic validation rules
+        if not text or len(text) < 2:
+            return False
+        
+        # Filter out malformed extractions
+        malformed_patterns = [
+            r'^(for|and|or|the|of|in|at|by|with|from|to)$',  # Common stop words
+            r'.*\s+(for|and|or|the|of|in|at|by|with|from|to)\s*$',  # Ending with stop words
+            r'^[^a-zA-Z]*$',  # Only non-letters
+            r'^\W+$',  # Only punctuation
+            r'.*\s+for\s*$',  # Specific case: "Apple for"
+        ]
+        
+        for pattern in malformed_patterns:
+            if re.match(pattern, text, re.IGNORECASE):
+                return False
+        
+        # Entity type specific validation
+        if candidate.entity_type == 'person':
+            # Person names should have alphabetic characters
+            if not re.search(r'[A-Za-z]', text):
+                return False
+            # Avoid single words unless they're titles
+            if ' ' not in text and not text.startswith(('Dr.', 'Prof.', 'Mr.', 'Ms.', 'Mrs.')):
+                # Allow single-word names only if confidence is very high
+                if candidate.confidence < 0.9:
+                    return False
+        
+        elif candidate.entity_type == 'organization':
+            # Organizations shouldn't end with prepositions
+            if re.search(r'\s+(for|by|with|from|to|at|in|of)\s*$', text, re.IGNORECASE):
+                return False
+        
+        return True
+    
+    def _normalize_entity_text(self, text: str) -> str:
+        """Normalize entity text for comparison"""
+        return re.sub(r'\s+', ' ', text.strip().lower())
+    
+    def _should_merge_entities(self, candidate1: ExtractionCandidate, candidate2: ExtractionCandidate) -> bool:
+        """
+        Determine if two entity candidates should be merged
+        Handles containment, overlap, and similarity cases
+        """
+        if candidate1.entity_type != candidate2.entity_type:
+            return False
+        
+        text1 = self._normalize_entity_text(candidate1.text)
+        text2 = self._normalize_entity_text(candidate2.text)
+        
+        # Exact match
+        if text1 == text2:
+            return True
+        
+        # Containment check - "Sarah" vs "Sarah Johnson"
+        if text1 in text2 or text2 in text1:
+            # Only merge if one is substantially longer (not just one character difference)
+            min_len = min(len(text1), len(text2))
+            max_len = max(len(text1), len(text2))
+            if max_len - min_len >= 3:  # At least 3 character difference
+                return True
+        
+        # Position overlap check
+        if self._positions_overlap(candidate1, candidate2):
+            return True
+        
+        # Fuzzy similarity for same entity type (if available)
+        if hasattr(self, '_fuzzy_similarity'):
+            similarity = self._fuzzy_similarity(text1, text2)
+            if similarity > 0.85:  # High similarity threshold
+                return True
+        
+        return False
+    
+    def _positions_overlap(self, candidate1: ExtractionCandidate, candidate2: ExtractionCandidate) -> bool:
+        """Check if two candidates have overlapping text positions"""
+        # Check if positions overlap by more than 50%
+        start1, end1 = candidate1.start_pos, candidate1.end_pos
+        start2, end2 = candidate2.start_pos, candidate2.end_pos
+        
+        overlap_start = max(start1, start2)
+        overlap_end = min(end1, end2)
+        
+        if overlap_end <= overlap_start:
+            return False  # No overlap
+        
+        overlap_len = overlap_end - overlap_start
+        len1 = end1 - start1
+        len2 = end2 - start2
+        
+        # Check if overlap is significant (>50% of either entity)
+        return (overlap_len / len1 > 0.5) or (overlap_len / len2 > 0.5)
+    
+    def _merge_two_candidates(self, candidate1: ExtractionCandidate, candidate2: ExtractionCandidate) -> ExtractionCandidate:
+        """
+        Merge two entity candidates, keeping the better one and combining evidence
+        """
+        # Determine which candidate to keep as primary
+        if candidate1.confidence > candidate2.confidence:
+            primary, secondary = candidate1, candidate2
+        elif candidate1.confidence < candidate2.confidence:
+            primary, secondary = candidate2, candidate1
+        else:
+            # Same confidence - prefer longer, more complete entity names
+            if len(candidate1.text) > len(candidate2.text):
+                primary, secondary = candidate1, candidate2
+            else:
+                primary, secondary = candidate2, candidate1
+        
+        # Create merged candidate
+        merged = ExtractionCandidate(
+            text=primary.text,
+            start_pos=primary.start_pos,
+            end_pos=primary.end_pos,
+            entity_type=primary.entity_type,
+            confidence=max(primary.confidence, secondary.confidence),
+            strategy=primary.strategy,
+            context_window=primary.context_window,
+            evidence=f"{primary.evidence}; {secondary.evidence}",
+            properties={**primary.properties, **secondary.properties}
+        )
+        
+        # Add merge metadata
+        merged.properties['merged_from'] = [primary.strategy.value, secondary.strategy.value]
+        merged.properties['merge_confidence_boost'] = 0.05  # Small boost for multiple detections
+        merged.confidence = min(1.0, merged.confidence + 0.05)
+        
+        return merged
     
     def get_extraction_statistics(self) -> Dict[str, Any]:
         """Get extraction statistics"""
