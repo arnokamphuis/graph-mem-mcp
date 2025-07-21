@@ -140,7 +140,10 @@ class SophisticatedRelationshipExtractor:
     def __init__(self, 
                  confidence_threshold: float = 0.7,
                  max_context_length: int = 512,
-                 schema_manager: Optional[SchemaManager] = None):
+                 schema_manager: Optional[SchemaManager] = None,
+                 enable_transformer: bool = True,
+                 enable_dependency_parsing: bool = True,
+                 enable_pattern_matching: bool = True):
         """
         Initialize the sophisticated relationship extractor
         
@@ -148,10 +151,16 @@ class SophisticatedRelationshipExtractor:
             confidence_threshold: Minimum confidence for relationship acceptance
             max_context_length: Maximum context window for analysis
             schema_manager: Schema manager for relationship type validation
+            enable_transformer: Whether to enable transformer-based extraction
+            enable_dependency_parsing: Whether to enable dependency parsing
+            enable_pattern_matching: Whether to enable pattern-based extraction
         """
         self.confidence_threshold = confidence_threshold
         self.max_context_length = max_context_length
         self.schema_manager = schema_manager
+        self.enable_transformer = enable_transformer
+        self.enable_dependency_parsing = enable_dependency_parsing
+        self.enable_pattern_matching = enable_pattern_matching
         self.logger = logging.getLogger(__name__)
         
         # Initialize extraction strategies
@@ -174,6 +183,10 @@ class SophisticatedRelationshipExtractor:
         """Initialize transformer models for relationship extraction"""
         self.relation_classifier = None
         self.tokenizer = None
+        
+        if not self.enable_transformer:
+            self.logger.info("🔧 Transformer models disabled")
+            return
         
         if not TRANSFORMERS_AVAILABLE:
             self.logger.warning("⚠️  Transformers not available - skipping transformer models")
