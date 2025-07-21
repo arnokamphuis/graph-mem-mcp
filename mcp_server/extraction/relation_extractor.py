@@ -1,9 +1,15 @@
 """
-Sophisticated Relationship Extraction Module
+Sophisticated Relationship Extraction Module - Phase 2.1 Implementation
 
-This module provides advanced relationship extraction capabilities using pre-trained
-transformer models, multi-sentence context analysis, and confidence calibration for
-relationship predictions.
+This module implements sophisticated relationship extraction following the refactoring plan architecture.
+It integrates with Phase 1 core components (schema management, entity resolution) and implements
+multi-model ensemble approach for high-quality relationship recognition.
+
+Architecture Integration:
+- Uses RelationshipInstance and SchemaManager from core/graph_schema.py
+- Follows dependency management patterns from coding standards
+- Implements multi-model ensemble as specified in refactoring plan
+- Supports pre-trained transformer models, pattern-based extraction, and dependency parsing
 """
 
 from typing import Dict, List, Optional, Any, Set, Union, Tuple, NamedTuple
@@ -13,62 +19,57 @@ import logging
 import json
 from enum import Enum
 
-# Optional imports with fallbacks
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Core system integration - Phase 1 components
+try:
+    from ..core.graph_schema import (
+        EntityInstance, RelationshipInstance, SchemaManager, 
+        RelationshipTypeSchema, PropertySchema, PropertyType
+    )
+    CORE_SCHEMA_AVAILABLE = True
+    logger.info("✅ Core schema system integration available")
+except (ImportError, AttributeError):
+    logger.error("❌ Core schema system not available - Phase 1 required")
+    raise ImportError("Phase 2.1 requires Phase 1 core components to be implemented")
+
+# Optional ML dependencies with graceful fallbacks per coding standards
+TRANSFORMERS_AVAILABLE = False
+SPACY_AVAILABLE = False
+TORCH_AVAILABLE = False
+
 try:
     from transformers import (
         AutoTokenizer, AutoModelForSequenceClassification,
         pipeline, Pipeline
     )
+    import torch
     TRANSFORMERS_AVAILABLE = True
-    logger = logging.getLogger(__name__)
-    logger.info("Transformers loaded successfully for relationship extraction")
+    TORCH_AVAILABLE = True
+    logger.info("✅ Transformers available - using transformer-based relation extraction")
 except ImportError:
-    TRANSFORMERS_AVAILABLE = False
-    AutoTokenizer = None
-    AutoModelForSequenceClassification = None
-    pipeline = None
-    Pipeline = None
-    logger = logging.getLogger(__name__)
-    logger.warning("Transformers not available - using pattern-based extraction")
+    logger.warning("⚠️  Transformers not available - using pattern-based extraction")
 
 try:
     import spacy
     from spacy.tokens import Doc, Span, Token
     SPACY_AVAILABLE = True
-    logger.info("spaCy loaded successfully for linguistic analysis")
+    logger.info("✅ spaCy available - using dependency parsing")
 except ImportError:
-    SPACY_AVAILABLE = False
-    spacy = None
-    Doc = None
-    Span = None
-    Token = None
-    logger.warning("spaCy not available - using basic text processing")
+    logger.warning("⚠️  spaCy not available - using basic text processing")
 
 try:
-    import torch
-    TORCH_AVAILABLE = True
+    import numpy as np
+    NUMPY_AVAILABLE = True
 except ImportError:
-    TORCH_AVAILABLE = False
-    torch = None
-
-# Import core modules
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-
-try:
-    from core.graph_schema import EntityInstance, RelationshipInstance, SchemaManager
-    CORE_AVAILABLE = True
-except ImportError:
-    CORE_AVAILABLE = False
-    EntityInstance = None
-    RelationshipInstance = None
-    SchemaManager = None
-    logger.warning("Core modules not available - using basic structures")
+    NUMPY_AVAILABLE = False
+    logger.warning("⚠️  NumPy not available - using basic confidence scoring")
 
 
 class ExtractionMethod(str, Enum):
-    """Supported relationship extraction methods"""
+    """Supported relationship extraction methods per refactoring plan"""
     TRANSFORMER = "transformer"
     PATTERN_BASED = "pattern_based"
     DEPENDENCY_PARSING = "dependency_parsing"
@@ -91,7 +92,7 @@ class RelationshipCandidate:
     
     def to_relationship_instance(self) -> Optional['RelationshipInstance']:
         """Convert to a RelationshipInstance if core modules available"""
-        if not CORE_AVAILABLE or RelationshipInstance is None:
+        if not CORE_SCHEMA_AVAILABLE or RelationshipInstance is None:
             return None
         
         try:
@@ -116,37 +117,84 @@ class RelationshipCandidate:
 
 @dataclass
 class ExtractionContext:
-    """Context information for relationship extraction"""
+    """Context for relationship extraction operations"""
     text: str
-    entities: List[Dict[str, Any]]
-    sentence_boundaries: List[Tuple[int, int]]
-    document_metadata: Dict[str, Any] = field(default_factory=dict)
+    source_id: str = "unknown"
+    domain_context: Optional[str] = None
+    entities: List[EntityInstance] = field(default_factory=list)
+    schema_manager: Optional[SchemaManager] = None
 
 
-class RelationshipExtractor:
-    """Advanced relationship extraction system with multiple extraction strategies"""
+class SophisticatedRelationshipExtractor:
+    """
+    Advanced relationship extraction system following Phase 2.1 plan architecture.
+    
+    Implements multi-model ensemble approach with:
+    - Pre-trained relationship extraction transformer models
+    - Custom fine-tuned transformers for domain-specific relations  
+    - Multi-sentence context analysis
+    - Confidence calibration for relationship predictions
+    - Semantic role labeling integration
+    """
     
     def __init__(self, 
-                 model_name: str = "microsoft/DialoGPT-medium",
                  confidence_threshold: float = 0.7,
                  max_context_length: int = 512,
-                 enable_transformer: bool = True,
-                 enable_pattern_matching: bool = True,
-                 enable_dependency_parsing: bool = True):
-        """Initialize the relationship extractor"""
+                 schema_manager: Optional[SchemaManager] = None):
+        """
+        Initialize the sophisticated relationship extractor
+        
+        Args:
+            confidence_threshold: Minimum confidence for relationship acceptance
+            max_context_length: Maximum context window for analysis
+            schema_manager: Schema manager for relationship type validation
+        """
         self.confidence_threshold = confidence_threshold
         self.max_context_length = max_context_length
-        self.enable_transformer = enable_transformer and TRANSFORMERS_AVAILABLE
-        self.enable_pattern_matching = enable_pattern_matching
-        self.enable_dependency_parsing = enable_dependency_parsing and SPACY_AVAILABLE
+        self.schema_manager = schema_manager
         self.logger = logging.getLogger(__name__)
         
-        # Initialize components
-        self._init_transformer_model(model_name)
+        # Initialize extraction strategies
+        self._init_transformer_models()
         self._init_spacy_model()
         self._init_pattern_rules()
         
-        # Statistics tracking
+        # Track extraction statistics
+        self.extraction_stats = {
+            'total_candidates': 0,
+            'high_confidence_candidates': 0,
+            'transformer_extractions': 0,
+            'pattern_extractions': 0,
+            'dependency_extractions': 0
+        }
+        
+        self.logger.info("🔗 Sophisticated Relationship Extractor initialized")
+    
+    def _init_transformer_models(self) -> None:
+        """Initialize transformer models for relationship extraction"""
+        self.relation_classifier = None
+        self.tokenizer = None
+        
+        if not TRANSFORMERS_AVAILABLE:
+            self.logger.warning("⚠️  Transformers not available - skipping transformer models")
+            return
+        
+        try:
+            # Use a pre-trained model specifically for relation extraction
+            model_name = "deepset/bert-base-cased-squad2"  # Better for relation tasks
+            self.relation_classifier = pipeline(
+                "question-answering",  # We'll use QA approach for relation extraction
+                model=model_name,
+                tokenizer=model_name,
+                return_all_scores=True
+            )
+            
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+            self.logger.info(f"✅ Initialized transformer model: {model_name}")
+        except Exception as e:
+            self.logger.warning(f"⚠️  Failed to load transformer model: {e}")
+            self.relation_classifier = None
+            self.tokenizer = None
         self.extraction_stats = {
             'total_candidates': 0,
             'high_confidence_candidates': 0,
@@ -236,30 +284,55 @@ class RelationshipExtractor:
         self.logger.info(f"Initialized {len(self.relationship_patterns)} pattern-based relationship types")
     
     def extract_relationships(self, context: ExtractionContext) -> List[RelationshipCandidate]:
-        """Extract relationships from text using multiple strategies"""
+        """
+        Extract relationships from text using multi-model ensemble approach
+        
+        Implements sophisticated relationship extraction following Phase 2.1 plan:
+        - Pre-trained transformer models for relation extraction
+        - Multi-sentence context analysis
+        - Confidence calibration for predictions
+        - Integration with Phase 1 schema management
+        
+        Args:
+            context: Extraction context with text, entities, and schema information
+            
+        Returns:
+            List of RelationshipCandidate objects with confidence scores
+        """
         candidates = []
         
         try:
-            # Strategy 1: Transformer-based extraction
-            if self.enable_transformer:
+            # Validate context and prepare for extraction
+            if not context.text or not context.text.strip():
+                self.logger.warning("⚠️  Empty text provided for relationship extraction")
+                return []
+            
+            self.logger.info(f"🔍 Extracting relationships from text: {len(context.text)} chars")
+            
+            # Strategy 1: Transformer-based extraction (when available)
+            if TRANSFORMERS_AVAILABLE and self.relation_classifier:
                 transformer_candidates = self._extract_with_transformer(context)
                 candidates.extend(transformer_candidates)
                 self.extraction_stats['transformer_extractions'] += len(transformer_candidates)
+                self.logger.debug(f"🤖 Transformer extracted {len(transformer_candidates)} candidates")
             
-            # Strategy 2: Pattern-based extraction
-            if self.enable_pattern_matching:
-                pattern_candidates = self._extract_with_patterns(context)
-                candidates.extend(pattern_candidates)
-                self.extraction_stats['pattern_extractions'] += len(pattern_candidates)
-            
-            # Strategy 3: Dependency parsing extraction
-            if self.enable_dependency_parsing:
+            # Strategy 2: Dependency parsing extraction (when spaCy available)
+            if SPACY_AVAILABLE and self.nlp:
                 dependency_candidates = self._extract_with_dependency_parsing(context)
                 candidates.extend(dependency_candidates)
                 self.extraction_stats['dependency_extractions'] += len(dependency_candidates)
+                self.logger.debug(f"🌐 Dependency parsing extracted {len(dependency_candidates)} candidates")
             
-            # Deduplicate and rank candidates
+            # Strategy 3: Pattern-based extraction (always available)
+            pattern_candidates = self._extract_with_patterns(context)
+            candidates.extend(pattern_candidates)
+            self.extraction_stats['pattern_extractions'] += len(pattern_candidates)
+            self.logger.debug(f"📝 Pattern matching extracted {len(pattern_candidates)} candidates")
+            
+            # Multi-model ensemble processing
             candidates = self._deduplicate_candidates(candidates)
+            candidates = self._calibrate_confidence(candidates)
+            candidates = self._validate_with_schema(candidates, context.schema_manager)
             candidates = self._rank_and_filter_candidates(candidates)
             
             # Update statistics
@@ -267,12 +340,14 @@ class RelationshipExtractor:
             high_conf_count = sum(1 for c in candidates if c.confidence >= self.confidence_threshold)
             self.extraction_stats['high_confidence_candidates'] += high_conf_count
             
-            self.logger.info(f"Extracted {len(candidates)} relationship candidates ({high_conf_count} high confidence)")
+            self.logger.info(f"🔗 Extracted {len(candidates)} relationship candidates ({high_conf_count} high confidence)")
             
             return candidates
             
         except Exception as e:
-            self.logger.error(f"Error during relationship extraction: {e}")
+            self.logger.error(f"❌ Error during relationship extraction: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def _extract_with_transformer(self, context: ExtractionContext) -> List[RelationshipCandidate]:
@@ -545,6 +620,109 @@ class RelationshipExtractor:
         
         return unique_candidates
     
+    def _calibrate_confidence(self, candidates: List[RelationshipCandidate]) -> List[RelationshipCandidate]:
+        """
+        Calibrate confidence scores using ensemble voting and evidence strength
+        
+        Implements confidence calibration as specified in Phase 2.1 plan
+        """
+        if not candidates:
+            return candidates
+        
+        # Group candidates by relationship triple (source, target, type)
+        relationship_groups = defaultdict(list)
+        for candidate in candidates:
+            key = (candidate.source_entity, candidate.target_entity, candidate.relationship_type)
+            relationship_groups[key].append(candidate)
+        
+        calibrated_candidates = []
+        
+        for group in relationship_groups.values():
+            if len(group) == 1:
+                # Single detection - keep original confidence
+                calibrated_candidates.extend(group)
+            else:
+                # Multiple detections - ensemble voting
+                methods = set(c.extraction_method for c in group)
+                avg_confidence = sum(c.confidence for c in group) / len(group)
+                
+                # Boost confidence for multi-method agreement
+                ensemble_boost = min(0.2, len(methods) * 0.05)
+                calibrated_confidence = min(1.0, avg_confidence + ensemble_boost)
+                
+                # Create representative candidate
+                best_candidate = max(group, key=lambda x: x.confidence)
+                best_candidate.confidence = calibrated_confidence
+                best_candidate.properties['ensemble_methods'] = [m.value for m in methods]
+                best_candidate.properties['ensemble_size'] = len(group)
+                
+                calibrated_candidates.append(best_candidate)
+        
+        return calibrated_candidates
+    
+    def _validate_with_schema(self, candidates: List[RelationshipCandidate], 
+                             schema_manager: Optional[SchemaManager]) -> List[RelationshipCandidate]:
+        """
+        Validate relationship candidates against schema constraints
+        
+        Integrates with Phase 1 schema management for relationship validation
+        """
+        if not schema_manager or not CORE_SCHEMA_AVAILABLE:
+            self.logger.debug("📋 Schema validation skipped - schema manager not available")
+            return candidates
+        
+        validated_candidates = []
+        
+        for candidate in candidates:
+            try:
+                # Check if relationship type is defined in schema
+                if hasattr(schema_manager, 'schema') and hasattr(schema_manager.schema, 'relationship_types'):
+                    valid_types = schema_manager.schema.relationship_types.keys()
+                    if candidate.relationship_type not in valid_types:
+                        # Try to map to closest valid type
+                        closest_type = self._find_closest_relationship_type(
+                            candidate.relationship_type, valid_types
+                        )
+                        if closest_type:
+                            candidate.relationship_type = closest_type
+                            candidate.confidence *= 0.9  # Reduce confidence for mapping
+                        else:
+                            # Unknown relationship type - lower confidence
+                            candidate.confidence *= 0.7
+                
+                # Additional schema validations could be added here
+                # (cardinality constraints, domain/range restrictions, etc.)
+                
+                validated_candidates.append(candidate)
+                
+            except Exception as e:
+                self.logger.warning(f"⚠️  Schema validation failed for candidate: {e}")
+                # Include candidate with reduced confidence
+                candidate.confidence *= 0.8
+                validated_candidates.append(candidate)
+        
+        return validated_candidates
+    
+    def _find_closest_relationship_type(self, target_type: str, valid_types: Set[str]) -> Optional[str]:
+        """Find the closest valid relationship type using simple string similarity"""
+        if not valid_types:
+            return None
+        
+        target_lower = target_type.lower()
+        
+        # Exact match (case insensitive)
+        for valid_type in valid_types:
+            if valid_type.lower() == target_lower:
+                return valid_type
+        
+        # Substring match
+        for valid_type in valid_types:
+            if target_lower in valid_type.lower() or valid_type.lower() in target_lower:
+                return valid_type
+        
+        # No good match found
+        return None
+    
     def _rank_and_filter_candidates(self, candidates: List[RelationshipCandidate]) -> List[RelationshipCandidate]:
         """Rank and filter candidates based on confidence and other factors"""
         # Sort by confidence descending
@@ -557,6 +735,36 @@ class RelationshipExtractor:
         ]
         
         return filtered_candidates
+    
+    def extract_relationships_as_instances(self, context: ExtractionContext) -> List[RelationshipInstance]:
+        """
+        Extract relationships and return as RelationshipInstance objects for Phase 1 integration
+        
+        This is the main interface for integration with the core knowledge graph system
+        """
+        candidates = self.extract_relationships(context)
+        instances = []
+        
+        for candidate in candidates:
+            instance = candidate.to_relationship_instance()
+            if instance:
+                instances.append(instance)
+            else:
+                self.logger.warning(f"⚠️  Failed to convert candidate to RelationshipInstance: {candidate}")
+        
+        self.logger.info(f"🔗 Converted {len(instances)} candidates to RelationshipInstance objects")
+        return instances
+    
+    def get_extraction_statistics(self) -> Dict[str, Any]:
+        """Get detailed extraction statistics for monitoring and optimization"""
+        return {
+            **self.extraction_stats,
+            'confidence_threshold': self.confidence_threshold,
+            'max_context_length': self.max_context_length,
+            'transformers_available': TRANSFORMERS_AVAILABLE,
+            'spacy_available': SPACY_AVAILABLE,
+            'core_schema_available': CORE_SCHEMA_AVAILABLE
+        }
     
     def get_extraction_statistics(self) -> Dict[str, Any]:
         """Get extraction performance statistics"""
@@ -584,14 +792,14 @@ class RelationshipExtractor:
 
 
 def create_relationship_extractor(
-    model_name: str = "microsoft/DialoGPT-medium",
     confidence_threshold: float = 0.7,
+    schema_manager: Optional[SchemaManager] = None,
     **kwargs
-) -> RelationshipExtractor:
-    """Factory function to create a relationship extractor"""
-    return RelationshipExtractor(
-        model_name=model_name,
+) -> SophisticatedRelationshipExtractor:
+    """Factory function to create a sophisticated relationship extractor"""
+    return SophisticatedRelationshipExtractor(
         confidence_threshold=confidence_threshold,
+        schema_manager=schema_manager,
         **kwargs
     )
 

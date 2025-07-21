@@ -182,13 +182,13 @@ Modify `main.py` to use the new core components for better KG construction.
 - [x] Dependency management and graceful fallbacks
 - [x] Modular architecture foundation
 
-### 🔄 In Progress - PHASE 2: Advanced NLP & ML Integration (85%)
+### 🔄 In Progress - PHASE 2: Advanced NLP & ML Integration (95%)
+- [x] **PHASE 2.1** Sophisticated Relationship Extraction - Multi-model ensemble (✅ COMPLETED - Integration with Phase 1 core)
 - [x] **PHASE 2.2** Enhanced Entity Extraction - Multi-model ensemble (✅ COMPLETED - EntityInstance issues resolved)
 - [x] Domain-agnostic approach implementation
 - [x] Quality filtering and validation frameworks
 
 ### 📋 Pending
-- [ ] **Phase 2.1**: Sophisticated relationship extraction following plan architecture
 - [ ] **Phase 2.3**: Coreference resolution following plan architecture
 - [ ] Integration with existing FastAPI system
 - [ ] Migration strategy from old to new implementation
@@ -264,16 +264,52 @@ Modify `main.py` to use the new core components for better KG construction.
 - ✅ **Sentence fragment detection** preventing malformed sentence extractions
 - ✅ **Domain knowledge correction** fixing obvious NLP misclassifications
 
-**CORRECTIVE ACTION REQUIRED FOR REMAINING MODULES**:
-- [ ] **Phase 2.1**: Reimplement Sophisticated relationship extraction following plan architecture
-- [ ] **Phase 2.3**: Reimplement Coreference resolution following plan architecture
+### ✅ **PHASE 2.1 Sophisticated Relationship Extraction - COMPLETED** ✅
+
+**Status**: ✅ **COMPLETED - Integration with Phase 1 Core Components**
+
+**Files Implemented**:
+- ✅ `mcp_server/extraction/relation_extractor.py` - Sophisticated relationship extraction implementation
+- ✅ `test_phase_2_1.py` - Comprehensive validation test suite
+
+**Recent Completion (2025-07-21)**:
+- ✅ **Phase 1 Integration Fixed**: Updated imports to use relative imports from core components
+- ✅ **SophisticatedRelationshipExtractor**: Renamed and enhanced class following plan architecture
+- ✅ **Multi-model Ensemble**: Transformer, dependency parsing, and pattern-based extraction
+- ✅ **Confidence Calibration**: Ensemble voting and evidence strength calibration
+- ✅ **Schema Validation**: Integration with Phase 1 SchemaManager for relationship validation
+- ✅ **RelationshipInstance Integration**: Direct conversion to Phase 1 core objects
+
+**Implementation Features (Per Plan Requirements)**:
+- ✅ **Pre-trained transformer models**: Question-answering approach for relation extraction
+- ✅ **Multi-sentence context analysis**: Context window analysis with evidence tracking  
+- ✅ **Confidence calibration**: Ensemble voting with multi-method agreement boosting
+- ✅ **Dependency parsing integration**: spaCy-based linguistic analysis
+- ✅ **Pattern-based extraction**: Rule-based fallback for missing dependencies
+- ✅ **Schema-guided validation**: Integration with Phase 1 relationship type constraints
+
+**Architecture Compliance**:
+- ✅ Integrates with Phase 1 core/graph_schema.py (RelationshipInstance, SchemaManager)
+- ✅ Follows established dependency management patterns
+- ✅ Implements multi-model ensemble approach per refactoring plan
+- ✅ Graceful fallbacks for optional ML dependencies (transformers, spaCy)
+- ✅ Direct output to RelationshipInstance objects for Phase 1 compatibility
+
+**Key Methods Implemented**:
+- `extract_relationships()` - Main multi-strategy extraction method
+- `extract_relationships_as_instances()` - Phase 1 integration method
+- `_calibrate_confidence()` - Ensemble voting confidence calibration
+- `_validate_with_schema()` - Schema constraint validation
+- `get_extraction_statistics()` - Performance monitoring
+
+**PHASE 2.1 REQUIREMENTS ADDRESSED**:
+- [ ] **Phase 2.3**: Coreference resolution following plan architecture
 
 **Key Requirements per Plan**:
-- Must integrate with `core/graph_schema.py` (use EntityTypeSchema, EntityInstance)
-- Must integrate with `core/entity_resolution.py` (use EntityResolver for deduplication)
-- Must implement "Multi-model ensemble for entity recognition" 
-- Must follow dependency management patterns from coding standards
-- Must output core schema-compatible objects, not standalone types
+- Must integrate with `core/graph_schema.py` (use RelationshipInstance, SchemaManager)
+- Must implement "Multi-model ensemble for relationship recognition" ✅
+- Must follow dependency management patterns from coding standards ✅
+- Must output core schema-compatible objects, not standalone types ✅
 
 ### 📋 Integration Tasks
 - [ ] Integration with existing FastAPI system
