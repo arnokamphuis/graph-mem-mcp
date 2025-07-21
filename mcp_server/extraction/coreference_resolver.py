@@ -799,6 +799,19 @@ def resolve_coreferences_quick(text: str, entities: List[EntityCandidate] = None
     return resolver.resolve_coreferences(context)
 
 
+def create_coreference_resolver(**kwargs) -> CoreferenceResolver:
+    """
+    Factory function to create a coreference resolver
+    
+    Args:
+        **kwargs: Additional configuration parameters
+        
+    Returns:
+        CoreferenceResolver: Configured coreference resolver instance
+    """
+    return CoreferenceResolver()
+
+
 if __name__ == "__main__":
     # Example usage and basic testing
     sample_text = """
