@@ -202,10 +202,12 @@ class EntityExtractor:
         # Entity patterns for pattern-based extraction
         self.entity_patterns = {
             EntityType.PERSON: [
-                r'\b[A-Z][a-z]+ [A-Z][a-z]+\b',  # First Last
                 r'\bDr\. [A-Z][a-z]+ [A-Z][a-z]+\b',  # Dr. First Last
                 r'\bProf\. [A-Z][a-z]+ [A-Z][a-z]+\b',  # Prof. First Last
+                r'\bMr\. [A-Z][a-z]+ [A-Z][a-z]+\b',  # Mr. First Last
+                r'\bMs\. [A-Z][a-z]+ [A-Z][a-z]+\b',  # Ms. First Last
                 r'\b[A-Z][a-z]+ [A-Z]\. [A-Z][a-z]+\b',  # First M. Last
+                r'\b[A-Z][a-z]{2,} [A-Z][a-z]{2,}\b',  # First Last (min 3 chars each)
             ],
             EntityType.ORGANIZATION: [
                 r'\b[A-Z][a-z]+ Inc\.?\b',  # Company Inc
@@ -213,7 +215,8 @@ class EntityExtractor:
                 r'\b[A-Z][a-z]+ Ltd\.?\b',  # Company Ltd
                 r'\b[A-Z][a-z]+ Company\b',  # Company Company
                 r'\b[A-Z][a-z]+ Corporation\b',  # Company Corporation
-                r'\b[A-Z]{2,}\b',  # Acronyms like IBM, NASA
+                r'\b[A-Z][a-z]+ University\b',  # University names
+                r'\b[A-Z]{3,}(?:\s+[A-Z]{3,})*\b',  # Acronyms like IBM, NASA (min 3 chars)
             ],
             EntityType.LOCATION: [
                 r'\b[A-Z][a-z]+ City\b',  # City names
@@ -221,6 +224,7 @@ class EntityExtractor:
                 r'\bMount [A-Z][a-z]+\b',  # Mountains
                 r'\bLake [A-Z][a-z]+\b',  # Lakes
                 r'\bRiver [A-Z][a-z]+\b',  # Rivers
+                r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*, [A-Z][a-z]+\b',  # City, Country
             ],
             EntityType.TECHNOLOGY: [
                 r'\bPython\b', r'\bJava\b', r'\bJavaScript\b',
@@ -228,6 +232,17 @@ class EntityExtractor:
                 r'\bDocker\b', r'\bKubernetes\b', r'\bAWS\b',
                 r'\bAPI\b', r'\bML\b', r'\bAI\b'
             ]
+        }
+        
+        # Common words to exclude from entity extraction
+        self.stopwords = {
+            'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with',
+            'by', 'from', 'up', 'about', 'into', 'through', 'during', 'before',
+            'after', 'above', 'below', 'between', 'among', 'under', 'over',
+            'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
+            'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might',
+            'must', 'can', 'shall', 'this', 'that', 'these', 'those', 'a', 'an',
+            'worked', 'works', 'working', 'won', 'wins', 'winning'
         }
         
         logger.info(f"🚀 EntityExtractor initialized with {len([k for k, v in self.stats['extraction_methods_enabled'].items() if v])} extraction methods")
@@ -323,6 +338,10 @@ class EntityExtractor:
                     entity_text = match.group()
                     start_pos = match.start()
                     end_pos = match.end()
+                    
+                    # Filter out stopwords and invalid entities
+                    if not self._is_valid_entity(entity_text, entity_type):
+                        continue
                     
                     # Get context window (50 chars before and after)
                     context_start = max(0, start_pos - 50)
@@ -652,6 +671,54 @@ class EntityExtractor:
             'QUANTITY': EntityType.QUANTITY
         }
         return mapping.get(label.upper(), EntityType.UNKNOWN)
+    
+    def _is_valid_entity(self, entity_text: str, entity_type: EntityType) -> bool:
+        """Validate if an extracted entity is legitimate"""
+        # Convert to lowercase for checking
+        text_lower = entity_text.lower().strip()
+        
+        # Filter out empty or very short entities
+        if len(text_lower) < 2:
+            return False
+        
+        # Filter out common stopwords
+        if text_lower in self.stopwords:
+            return False
+        
+        # Filter out single characters and common words
+        words = text_lower.split()
+        if len(words) == 1 and len(words[0]) <= 2:
+            return False
+        
+        # Check for specific entity type validity
+        if entity_type == EntityType.PERSON:
+            # Person names should not contain only common words
+            common_words = {'the', 'of', 'at', 'in', 'on', 'and', 'or', 'but'}
+            if all(word in common_words for word in words):
+                return False
+            
+            # Should have at least one word with proper capitalization in original
+            if not any(word[0].isupper() and word[1:].islower() for word in entity_text.split() if len(word) > 1):
+                return False
+        
+        elif entity_type == EntityType.ORGANIZATION:
+            # Organization names should not be single common words
+            if len(words) == 1 and text_lower in {'the', 'of', 'at', 'in', 'on', 'and', 'or'}:
+                return False
+        
+        # Additional filters for specific problematic patterns
+        problematic_patterns = [
+            r'^\w{1,2}$',  # Single or double characters
+            r'^(the|and|of|at|in|on|or|but|to|for|with|by)$',  # Common words
+            r'^\w+ed$',  # Past tense verbs
+            r'^\w+ing$',  # Present participle verbs
+        ]
+        
+        for pattern in problematic_patterns:
+            if re.match(pattern, text_lower):
+                return False
+        
+        return True
     
     def _canonicalize_entity(self, entity_text: str, entity_type: EntityType) -> str:
         """Generate canonical form of entity text"""
