@@ -189,9 +189,9 @@ Modify `main.py` to use the new core components for better KG construction.
 - [x] Domain-agnostic approach implementation
 - [x] Quality filtering and validation frameworks
 
-### 📋 Pending
-- [x] **Phase 2.1**: Complete testing validation (>90% test coverage required) - ✅ **ACHIEVED** (100%)
-- [x] **Phase 2.3**: Coreference resolution following plan architecture - ✅ **COMPLETE** (100% test success)
+### 📋 Next Priority
+- [ ] **Phase 3.1**: Quality Assessment Framework - Entity completeness scoring, relationship accuracy metrics, graph connectivity analysis
+- [ ] **Phase 3.2**: Performance Optimization - Graph database integration, indexing strategies, query optimization
 - [ ] Integration with existing FastAPI system
 - [ ] Migration strategy from old to new implementation
 
