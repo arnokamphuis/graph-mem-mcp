@@ -292,26 +292,22 @@ def advanced_deduplication(entities: List[EntityResult]) -> List[EntityResult]:
     - Exact matches
     - Substring containment (Sarah vs Sarah Johnson)
     - Malformed extractions
-    - Entity type corrections
     """
     if not entities:
         return []
     
-    # Phase 1: Apply entity type corrections and filter invalid entities
-    corrected_entities = []
+    # Phase 1: Filter out clearly invalid entities (domain-agnostic validation only)
+    valid_entities = []
     for entity in entities:
-        # Apply domain knowledge corrections
-        corrected_entity = correct_entity_type(entity)
-        
-        if is_valid_entity_name(corrected_entity.name):
-            corrected_entities.append(corrected_entity)
+        if is_valid_entity_name(entity.name):
+            valid_entities.append(entity)
         else:
             print(f"  🗑️  Filtered invalid: '{entity.name}' (reason: {entity.extracted_by})")
     
     # Phase 2: Advanced deduplication
     deduplicated = {}
     
-    for entity in corrected_entities:
+    for entity in valid_entities:
         # Find if this entity should be merged with an existing one
         merge_target = None
         for existing_key, existing_entity in deduplicated.items():
@@ -330,27 +326,6 @@ def advanced_deduplication(entities: List[EntityResult]) -> List[EntityResult]:
             deduplicated[key] = entity
     
     return list(deduplicated.values())
-
-def correct_entity_type(entity: EntityResult) -> EntityResult:
-    """Apply domain knowledge to correct obvious entity type misclassifications"""
-    name = entity.name.strip().lower()
-    
-    # Technology/AI terms that shouldn't be locations
-    tech_terms = ['ai', 'artificial intelligence', 'ml', 'machine learning', 'neural network']
-    
-    if name in tech_terms and entity.entity_type == 'location':
-        # Correct the entity type
-        corrected = EntityResult(
-            name=entity.name,
-            entity_type='technology',
-            confidence=entity.confidence * 0.9,  # Slight confidence reduction for correction
-            extracted_by=f"{entity.extracted_by}_corrected",
-            context=entity.context,
-            attributes={**(entity.attributes or {}), 'type_corrected': f"from_{entity.entity_type}_to_technology"}
-        )
-        return corrected
-    
-    return entity
 
 def is_valid_entity_name(name: str) -> bool:
     """Check if an entity name is valid"""

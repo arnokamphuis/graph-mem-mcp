@@ -151,7 +151,7 @@ class EnhancedEntityExtractor:
         # Initialize models per plan's multi-model ensemble approach
         self._initialize_models()
         
-        self.logger.info(f"🚀 Enhanced Entity Extractor initialized with schema: {len(self.schema_manager.entity_types)} entity types")
+        self.logger.info(f"🚀 Enhanced Entity Extractor initialized with schema: {len(self.schema_manager.schema.entity_types)} entity types")
     
     def _initialize_models(self):
         """Initialize multi-model ensemble components"""
@@ -272,7 +272,7 @@ class EnhancedEntityExtractor:
         candidates = []
         
         # Use schema-defined entity types and their properties for targeted extraction
-        for entity_type_name, entity_schema in context.schema_manager.entity_types.items():
+        for entity_type_name, entity_schema in context.schema_manager.schema.entity_types.items():
             # Create extraction patterns based on schema metadata
             patterns = self._generate_schema_patterns(entity_schema)
             
@@ -375,7 +375,7 @@ class EnhancedEntityExtractor:
         
         for entity_type, patterns in refined_patterns.items():
             # Only extract if entity type exists in schema
-            if entity_type in context.schema_manager.entity_types:
+            if entity_type in context.schema_manager.schema.entity_types:
                 for pattern in patterns:
                     matches = re.finditer(pattern, context.text)
                     
@@ -497,7 +497,7 @@ class EnhancedEntityExtractor:
         mapped_type = label_mapping.get(transformer_label.upper())
         
         # Only return if the mapped type exists in our schema
-        if mapped_type and mapped_type in schema_manager.entity_types:
+        if mapped_type and mapped_type in schema_manager.schema.entity_types:
             return mapped_type
         
         return None
@@ -554,7 +554,7 @@ class EnhancedEntityExtractor:
         mapped_type = label_mapping.get(spacy_label.upper())
         
         # Only return if the mapped type exists in our schema
-        if mapped_type and mapped_type in schema_manager.entity_types:
+        if mapped_type and mapped_type in schema_manager.schema.entity_types:
             return mapped_type
         
         return None
@@ -604,7 +604,7 @@ class EnhancedEntityExtractor:
         }
         
         for entity_type, patterns in contextual_patterns.items():
-            if entity_type in context.schema_manager.entity_types:
+            if entity_type in context.schema_manager.schema.entity_types:
                 for pattern, group_idx in patterns:
                     matches = re.finditer(pattern, context.text)
                     
@@ -698,6 +698,19 @@ class EnhancedEntityExtractor:
         
         return True
     
+    def _apply_domain_knowledge_correction(self, candidate: ExtractionCandidate) -> ExtractionCandidate:
+        """
+        Apply generic validation - NO HARDCODED DOMAIN KNOWLEDGE
+        This function now only validates based on text structure, not domain-specific terms
+        """
+        # Domain-agnostic validation only - no hardcoded domain knowledge
+        # All entity classification should come from NLP models and input text context
+        
+        # Return the candidate unchanged - trust the ensemble voting and NLP models
+        return candidate
+        
+        return candidate
+
     def _merge_candidates(self, candidates: List[ExtractionCandidate], 
                          context: ExtractionContext) -> List[ExtractionCandidate]:
         """
@@ -707,11 +720,13 @@ class EnhancedEntityExtractor:
         if not candidates:
             return []
         
-        # Phase 1: Quality filtering - remove invalid extractions
+        # Phase 1: Quality filtering and domain knowledge correction
         valid_candidates = []
         for candidate in candidates:
             if self._is_valid_entity_extraction(candidate):
-                valid_candidates.append(candidate)
+                # Apply domain knowledge correction
+                corrected_candidate = self._apply_domain_knowledge_correction(candidate)
+                valid_candidates.append(corrected_candidate)
             else:
                 self.logger.debug(f"🗑️  Filtered invalid extraction: '{candidate.text}'")
         
@@ -845,7 +860,7 @@ class EnhancedEntityExtractor:
         if not text or len(text) < 2:
             return False
         
-        # Filter out malformed extractions
+        # Filter out malformed extractions and sentence fragments
         malformed_patterns = [
             r'^(for|and|or|the|of|in|at|by|with|from|to)$',  # Common stop words
             r'.*\s+(for|and|or|the|of|in|at|by|with|from|to)\s*$',  # Ending with stop words
@@ -854,8 +869,21 @@ class EnhancedEntityExtractor:
             r'.*\s+for\s*$',  # Specific case: "Apple for"
         ]
         
+        # Sentence fragment detection - prevent full sentences being extracted as entities
+        sentence_patterns = [
+            r'.*\s(was|were|is|are|has|have|had|will|would|could|should)\s.*',  # Contains verbs
+            r'.*\s(presented|acquired|developed|created|published|funded)\s.*',  # Action verbs
+            r'.*\s(the|a|an)\s.*\s(the|a|an)\s.*',  # Multiple articles
+            r'^\s*[Tt]he\s.*\s(at|in|on|to|from|with|by)\s.*',  # Starts with "The" and has prepositions
+        ]
+        
         for pattern in malformed_patterns:
             if re.match(pattern, text, re.IGNORECASE):
+                return False
+                
+        for pattern in sentence_patterns:
+            if re.match(pattern, text, re.IGNORECASE):
+                logger.debug(f"Filtered sentence fragment: '{text}'")
                 return False
         
         # Entity type specific validation
