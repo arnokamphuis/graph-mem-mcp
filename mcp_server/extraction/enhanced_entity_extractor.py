@@ -1033,6 +1033,20 @@ def extract_entities_from_text(text: str, schema_manager: SchemaManager,
     return extractor.extract_entities(context)
 
 
+def create_enhanced_entity_extractor(schema_manager: SchemaManager, **kwargs) -> EnhancedEntityExtractor:
+    """
+    Factory function to create an enhanced entity extractor
+    
+    Args:
+        schema_manager: Schema manager instance from Phase 1
+        **kwargs: Additional configuration parameters
+        
+    Returns:
+        EnhancedEntityExtractor: Configured entity extractor instance
+    """
+    return EnhancedEntityExtractor(schema_manager=schema_manager)
+
+
 if __name__ == "__main__":
     # Example usage demonstrating Phase 1 integration
     from ..core.graph_schema import SchemaManager, EntityTypeSchema, PropertySchema, PropertyType
