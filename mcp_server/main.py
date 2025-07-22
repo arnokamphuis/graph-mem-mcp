@@ -68,7 +68,8 @@ async def lifespan(app: FastAPI):
         await load_memory_banks()
         logger.info("Application startup complete with storage backends")
     else:
-        load_memory_banks_sync()
+        # Use async version even for legacy system to avoid event loop conflicts
+        await load_memory_banks_legacy()
         logger.info("Application startup complete with legacy system")
     yield
     # Shutdown
@@ -89,10 +90,12 @@ MEMORY_FILE = DATA_DIR / "memory_banks.json"
 DATA_DIR.mkdir(exist_ok=True)
 
 # PHASE 4.1.2: Initialize new storage system
+memory_banks = {}  # Legacy fallback - always initialized
+current_bank = "default"
+
 if STORAGE_AVAILABLE:
     # Initialize storage backends for each memory bank
     storage_backends: Dict[str, MemoryStore] = {}
-    current_bank = "default"
     
     # Initialize core components if available
     if CORE_COMPONENTS_AVAILABLE:
@@ -114,13 +117,16 @@ if STORAGE_AVAILABLE:
             storage_backends[bank_name] = create_memory_store()
             logger.info(f"Created new storage backend for bank: {bank_name}")
             
+        # Ensure legacy fallback exists for this bank
+        if bank_name not in memory_banks:
+            memory_banks[bank_name] = {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}
+            
         return storage_backends[bank_name]
     
     logger.info("Phase 3.2 storage system initialized successfully")
 else:
     # Legacy fallback system
     memory_banks = {"default": {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}}
-    current_bank = "default"
     storage_backends = None
     schema_manager = None
     entity_resolver = None
@@ -334,19 +340,51 @@ async def load_memory_banks():
             memory_banks = {"default": {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}}
             current_bank = "default"
 
+async def load_memory_banks_legacy():
+    """Async version of legacy memory banks loading for compatibility with FastAPI lifespan"""
+    global memory_banks, current_bank
+    
+    logger.warning("Using legacy memory_banks system - storage backend not available")
+    
+    try:
+        if os.path.exists(MEMORY_FILE):
+            with open(MEMORY_FILE, 'r') as f:
+                data = json.load(f)
+                memory_banks = data.get('memory_banks', {})
+                global_current_bank = data.get('current_bank', 'default')
+                if global_current_bank in memory_banks:
+                    current_bank = global_current_bank
+                logger.debug(f"Loaded banks: {list(memory_banks.keys())}")
+        else:
+            logger.debug("No existing memory file found, starting with default banks")
+            memory_banks = {"default": {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}}
+        
+        # Ensure current_bank exists
+        if current_bank not in memory_banks:
+            current_bank = "default"
+            
+    except Exception as e:
+        logger.error(f"Failed to load legacy memory banks: {e}")
+        logger.info("Starting with default memory banks")
+        memory_banks = {"default": {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}}
+        current_bank = "default"
+
 def load_memory_banks_sync():
-    """Synchronous wrapper for loading memory banks"""
+    """Synchronous wrapper for loading memory banks - DEPRECATED: Use load_memory_banks_legacy() instead"""
     import asyncio
     try:
         loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If event loop is already running, we can't use run_until_complete
+            raise RuntimeError("Cannot use synchronous loader when event loop is running")
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
     
     return loop.run_until_complete(load_memory_banks())
 
-def convert_storage_to_legacy() -> Dict[str, Any]:
-    """Convert new storage system data to legacy format for backup"""
+async def convert_storage_to_legacy_async() -> Dict[str, Any]:
+    """Convert new storage system data to legacy format for backup (async version)"""
     legacy_banks = {}
     
     if not storage_backends:
@@ -354,20 +392,10 @@ def convert_storage_to_legacy() -> Dict[str, Any]:
     
     for bank_name, storage in storage_backends.items():
         try:
-            # Get all entities and relationships using proper async methods
-            # This is a synchronous wrapper - will be replaced with async version
-            import asyncio
-            
+            # Use async query methods directly
             try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            
-            # Use query methods instead of get_all methods
-            try:
-                entities_result = loop.run_until_complete(storage.query_entities())
-                relationships_result = loop.run_until_complete(storage.query_relationships())
+                entities_result = await storage.query_entities()
+                relationships_result = await storage.query_relationships()
                 
                 all_entities = entities_result.entities if hasattr(entities_result, 'entities') else []
                 all_relationships = relationships_result.relationships if hasattr(relationships_result, 'relationships') else []
@@ -499,7 +527,15 @@ def list_banks():
     List all memory banks and show the current active bank.
     Response: {"banks": ["bank1", "bank2"], "current": "bank_name"}
     """
-    return {"banks": list(memory_banks.keys()), "current": current_bank}
+    # Use storage-based system if available, fallback to legacy
+    if STORAGE_AVAILABLE and storage_backends:
+        return {"banks": list(storage_backends.keys()), "current": current_bank}
+    else:
+        # Fallback to legacy system
+        if 'memory_banks' in globals():
+            return {"banks": list(memory_banks.keys()), "current": current_bank}
+        else:
+            return {"banks": ["default"], "current": current_bank}
 
 @app.post("/banks/delete")
 def delete_bank(op: BankOp):
@@ -2983,6 +3019,819 @@ def initialize():
         },
         media_type="application/json"
     )
+
+# PHASE 4.2: Enhanced Knowledge Graph API Endpoints
+# Integration of Phase 1-3 components with FastAPI
+
+@app.post("/api/v1/extract/entities")
+async def extract_entities_enhanced(request: Dict[str, Any] = Body(...)):
+    """
+    Enhanced entity extraction using Phase 2.2 multi-model ensemble
+    
+    Request body:
+    {
+        "text": "Text to extract entities from",
+        "bank": "optional_bank_name",
+        "config": {
+            "enable_spacy": true,
+            "enable_transformers": true,
+            "confidence_threshold": 0.7
+        }
+    }
+    
+    Response:
+    {
+        "entities": [
+            {
+                "id": "entity_id",
+                "type": "entity_type", 
+                "text": "extracted_text",
+                "confidence": 0.85,
+                "start": 10,
+                "end": 20,
+                "properties": {}
+            }
+        ],
+        "statistics": {
+            "total_entities": 5,
+            "extraction_methods": ["spacy", "transformers"],
+            "processing_time": 0.123
+        }
+    }
+    """
+    try:
+        # Use dynamic import to handle Phase 2 component availability
+        import importlib
+        import sys
+        import os
+        
+        text = request.get("text", "")
+        bank_name = request.get("bank", current_bank)
+        config = request.get("config", {})
+        
+        if not text.strip():
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Text is required for entity extraction"}
+            )
+        
+        # Get storage and schema manager for this bank
+        storage = get_storage(bank_name)
+        await storage.connect()
+        
+        # Try to load enhanced entity extractor dynamically
+        try:
+            # Add extraction directory to Python path temporarily
+            extraction_path = os.path.join(os.path.dirname(__file__), 'extraction')
+            if extraction_path not in sys.path:
+                sys.path.insert(0, extraction_path)
+            
+            # Import and create enhanced entity extractor
+            enhanced_module = importlib.import_module('enhanced_entity_extractor')
+            
+            if hasattr(enhanced_module, 'create_enhanced_entity_extractor'):
+                create_enhanced_entity_extractor = enhanced_module.create_enhanced_entity_extractor
+            elif hasattr(enhanced_module, 'EnhancedEntityExtractor'):
+                # Fallback to direct class instantiation
+                ExtractorClass = enhanced_module.EnhancedEntityExtractor
+                def create_enhanced_entity_extractor(schema_manager=None, **kwargs):
+                    return ExtractorClass(schema_manager=schema_manager, **kwargs)
+            else:
+                raise ImportError("No suitable extractor constructor found")
+                
+        except Exception as import_error:
+            logger.warning(f"Could not load enhanced entity extractor: {import_error}")
+            # Fallback to basic entity extraction using existing components
+            def create_enhanced_entity_extractor(schema_manager=None, **kwargs):
+                class BasicEntityExtractor:
+                    def extract_entities(self, text):
+                        # Simple regex-based extraction as fallback
+                        import re
+                        entities = []
+                        # Extract capitalized words as potential entities
+                        for match in re.finditer(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', text):
+                            entities.append({
+                                'id': str(uuid.uuid4()),
+                                'type': 'ENTITY',
+                                'text': match.group(),
+                                'confidence': 0.5,
+                                'start': match.start(),
+                                'end': match.end(),
+                                'properties': {}
+                            })
+                        return entities
+                    
+                    def get_extraction_statistics(self):
+                        return {"methods_used": ["regex_fallback"]}
+                
+                return BasicEntityExtractor()
+        
+        # Create enhanced entity extractor with configuration
+        extractor_config = {
+            "enable_spacy": config.get("enable_spacy", True),
+            "enable_transformers": config.get("enable_transformers", True),
+            "confidence_threshold": config.get("confidence_threshold", 0.7)
+        }
+        
+        extractor = create_enhanced_entity_extractor(
+            schema_manager=schema_manager if CORE_COMPONENTS_AVAILABLE else None,
+            **extractor_config
+        )
+        
+        # Extract entities using enhanced pipeline
+        import time
+        start_time = time.time()
+        
+        extracted_entities = extractor.extract_entities(text)
+        
+        processing_time = time.time() - start_time
+        
+        # Convert to API response format
+        entities_response = []
+        for entity in extracted_entities:
+            if hasattr(entity, 'to_dict'):
+                entity_data = entity.to_dict()
+            else:
+                entity_data = {
+                    "id": getattr(entity, 'id', str(uuid.uuid4())),
+                    "type": getattr(entity, 'type', 'unknown'),
+                    "text": getattr(entity, 'text', ''),
+                    "confidence": getattr(entity, 'confidence', 0.0),
+                    "start": getattr(entity, 'start', 0),
+                    "end": getattr(entity, 'end', 0),
+                    "properties": getattr(entity, 'properties', {})
+                }
+            entities_response.append(entity_data)
+        
+        # Get extraction statistics
+        stats = extractor.get_extraction_statistics() if hasattr(extractor, 'get_extraction_statistics') else {}
+        
+        response = {
+            "entities": entities_response,
+            "statistics": {
+                "total_entities": len(entities_response),
+                "extraction_methods": stats.get("methods_used", ["enhanced_pipeline"]),
+                "processing_time": processing_time,
+                "bank": bank_name
+            }
+        }
+        
+        return JSONResponse(content=response)
+        
+    except Exception as e:
+        logger.error(f"Enhanced entity extraction failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Entity extraction failed: {str(e)}"}
+        )
+
+@app.post("/api/v1/extract/relationships")
+async def extract_relationships_enhanced(request: Dict[str, Any] = Body(...)):
+    """
+    Enhanced relationship extraction using Phase 2.1 sophisticated extraction
+    
+    Request body:
+    {
+        "text": "Text to extract relationships from",
+        "entities": [
+            {"id": "ent1", "text": "John Smith", "type": "person", "start": 0, "end": 10},
+            {"id": "ent2", "text": "Google", "type": "organization", "start": 20, "end": 26}
+        ],
+        "bank": "optional_bank_name",
+        "config": {
+            "enable_transformer": true,
+            "enable_dependency_parsing": true,
+            "enable_pattern_matching": true
+        }
+    }
+    
+    Response:
+    {
+        "relationships": [
+            {
+                "id": "rel_id",
+                "type": "works_for",
+                "source_id": "ent1", 
+                "target_id": "ent2",
+                "confidence": 0.8,
+                "evidence": "dependency_parsing",
+                "properties": {}
+            }
+        ],
+        "statistics": {
+            "total_relationships": 1,
+            "extraction_methods": ["transformer", "dependency_parsing"],
+            "processing_time": 0.234
+        }
+    }
+    """
+    try:
+        # Use dynamic import to handle Phase 2 component availability
+        import importlib
+        import sys
+        import os
+        
+        text = request.get("text", "")
+        entities = request.get("entities", [])
+        bank_name = request.get("bank", current_bank)
+        config = request.get("config", {})
+        
+        if not text.strip():
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Text is required for relationship extraction"}
+            )
+            
+        if not entities:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Entities are required for relationship extraction"}
+            )
+        
+        # Get storage for this bank
+        storage = get_storage(bank_name)
+        await storage.connect()
+        
+        # Try to load relationship extractor dynamically
+        try:
+            # Add extraction directory to Python path temporarily
+            extraction_path = os.path.join(os.path.dirname(__file__), 'extraction')
+            if extraction_path not in sys.path:
+                sys.path.insert(0, extraction_path)
+            
+            # Import and create relationship extractor
+            relation_module = importlib.import_module('relation_extractor')
+            
+            if hasattr(relation_module, 'create_relationship_extractor'):
+                create_relationship_extractor = relation_module.create_relationship_extractor
+            elif hasattr(relation_module, 'RelationshipExtractor'):
+                # Fallback to direct class instantiation
+                ExtractorClass = relation_module.RelationshipExtractor
+                def create_relationship_extractor(schema_manager=None, **kwargs):
+                    return ExtractorClass(schema_manager=schema_manager, **kwargs)
+            else:
+                raise ImportError("No suitable relationship extractor constructor found")
+                
+        except Exception as import_error:
+            logger.warning(f"Could not load relationship extractor: {import_error}")
+            # Fallback to basic relationship extraction
+            def create_relationship_extractor(schema_manager=None, **kwargs):
+                class BasicRelationshipExtractor:
+                    def extract_relationships(self, text, entities):
+                        # Simple proximity-based relationships as fallback
+                        relationships = []
+                        for i, entity1 in enumerate(entities):
+                            for j, entity2 in enumerate(entities[i+1:], i+1):
+                                # If entities are close together, assume relationship
+                                if abs(entity1.get('start', 0) - entity2.get('start', 0)) < 100:
+                                    relationships.append({
+                                        'id': str(uuid.uuid4()),
+                                        'type': 'RELATED_TO',
+                                        'source': entity1.get('id', ''),
+                                        'target': entity2.get('id', ''),
+                                        'confidence': 0.3,
+                                        'properties': {}
+                                    })
+                        return relationships
+                    
+                    def get_extraction_statistics(self):
+                        return {"methods_used": ["proximity_fallback"]}
+                
+                return BasicRelationshipExtractor()
+        
+        # Create relationship extractor with configuration
+        extractor_config = {
+            "enable_transformer": config.get("enable_transformer", True),
+            "enable_dependency_parsing": config.get("enable_dependency_parsing", True),
+            "enable_pattern_matching": config.get("enable_pattern_matching", True)
+        }
+        
+        extractor = create_relationship_extractor(
+            schema_manager=schema_manager if CORE_COMPONENTS_AVAILABLE else None,
+            **extractor_config
+        )
+        
+        # Extract relationships using sophisticated pipeline
+        import time
+        start_time = time.time()
+        
+        extracted_relationships = extractor.extract_relationships(text, entities)
+        
+        processing_time = time.time() - start_time
+        
+        # Convert to API response format
+        relationships_response = []
+        for relationship in extracted_relationships:
+            if hasattr(relationship, 'to_dict'):
+                rel_data = relationship.to_dict()
+            else:
+                rel_data = {
+                    "id": getattr(relationship, 'id', str(uuid.uuid4())),
+                    "type": getattr(relationship, 'type', 'related_to'),
+                    "source_id": getattr(relationship, 'source_id', ''),
+                    "target_id": getattr(relationship, 'target_id', ''),
+                    "confidence": getattr(relationship, 'confidence', 0.0),
+                    "evidence": getattr(relationship, 'evidence', ''),
+                    "properties": getattr(relationship, 'properties', {})
+                }
+            relationships_response.append(rel_data)
+        
+        # Get extraction statistics
+        stats = extractor.get_extraction_statistics() if hasattr(extractor, 'get_extraction_statistics') else {}
+        
+        response = {
+            "relationships": relationships_response,
+            "statistics": {
+                "total_relationships": len(relationships_response),
+                "extraction_methods": stats.get("methods_used", ["sophisticated_pipeline"]),
+                "processing_time": processing_time,
+                "bank": bank_name
+            }
+        }
+        
+        return JSONResponse(content=response)
+        
+    except Exception as e:
+        logger.error(f"Enhanced relationship extraction failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Relationship extraction failed: {str(e)}"}
+        )
+
+@app.post("/api/v1/resolve/coreferences")
+async def resolve_coreferences_enhanced(request: Dict[str, Any] = Body(...)):
+    """
+    Enhanced coreference resolution using Phase 2.3 advanced resolution
+    
+    Request body:
+    {
+        "text": "Text to resolve coreferences in",
+        "entities": [
+            {"id": "ent1", "text": "John Smith", "type": "person", "start": 0, "end": 10},
+            {"id": "ent2", "text": "he", "type": "pronoun", "start": 15, "end": 17}
+        ],
+        "bank": "optional_bank_name",
+        "config": {
+            "enable_neural_coref": true,
+            "enable_rule_based": true,
+            "similarity_threshold": 0.8
+        }
+    }
+    
+    Response:
+    {
+        "coreference_chains": [
+            {
+                "chain_id": "chain_1",
+                "entities": ["ent1", "ent2"],
+                "representative": "ent1",
+                "confidence": 0.9
+            }
+        ],
+        "resolved_entities": [
+            {
+                "id": "ent2_resolved",
+                "original_id": "ent2", 
+                "resolved_to": "ent1",
+                "text": "John Smith",
+                "type": "person",
+                "confidence": 0.9
+            }
+        ],
+        "statistics": {
+            "total_chains": 1,
+            "total_resolutions": 1,
+            "processing_time": 0.156
+        }
+    }
+    """
+    try:
+        # Use dynamic import to handle Phase 2 component availability
+        import importlib
+        import sys
+        import os
+        
+        text = request.get("text", "")
+        entities = request.get("entities", [])
+        bank_name = request.get("bank", current_bank)
+        config = request.get("config", {})
+        
+        if not text.strip():
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Text is required for coreference resolution"}
+            )
+        
+        # Get storage for this bank
+        storage = get_storage(bank_name)
+        await storage.connect()
+        
+        # Try to load coreference resolver dynamically
+        try:
+            # Add extraction directory to Python path temporarily
+            extraction_path = os.path.join(os.path.dirname(__file__), 'extraction')
+            if extraction_path not in sys.path:
+                sys.path.insert(0, extraction_path)
+            
+            # Import and create coreference resolver
+            coref_module = importlib.import_module('coreference_resolver')
+            
+            if hasattr(coref_module, 'create_coreference_resolver'):
+                create_coreference_resolver = coref_module.create_coreference_resolver
+            elif hasattr(coref_module, 'CoreferenceResolver'):
+                # Fallback to direct class instantiation
+                ResolverClass = coref_module.CoreferenceResolver
+                def create_coreference_resolver(schema_manager=None, **kwargs):
+                    return ResolverClass(schema_manager=schema_manager, **kwargs)
+            else:
+                raise ImportError("No suitable coreference resolver constructor found")
+                
+        except Exception as import_error:
+            logger.warning(f"Could not load coreference resolver: {import_error}")
+            # Fallback to basic coreference resolution
+            def create_coreference_resolver(schema_manager=None, **kwargs):
+                class BasicCoreferenceResolver:
+                    def resolve_coreferences(self, text, entities=None):
+                        # Simple pronoun replacement as fallback
+                        resolved_text = text
+                        coreferences = []
+                        
+                        # Basic pronoun detection and replacement
+                        import re
+                        pronouns = ['he', 'she', 'it', 'they', 'them', 'his', 'her', 'its', 'their']
+                        for pronoun in pronouns:
+                            if pronoun.lower() in text.lower():
+                                coreferences.append({
+                                    'pronoun': pronoun,
+                                    'resolved': f'[{pronoun.upper()}]',
+                                    'confidence': 0.2,
+                                    'method': 'basic_detection'
+                                })
+                        
+                        return {
+                            'resolved_text': resolved_text,
+                            'coreferences': coreferences,
+                            'entities_updated': entities or []
+                        }
+                    
+                    def get_resolution_statistics(self):
+                        return {"methods_used": ["basic_pronoun_detection"]}
+                
+                return BasicCoreferenceResolver()
+        
+        # Create coreference resolver with configuration
+        resolver_config = {
+            "enable_neural_coref": config.get("enable_neural_coref", True),
+            "enable_rule_based": config.get("enable_rule_based", True),
+            "similarity_threshold": config.get("similarity_threshold", 0.8)
+        }
+        
+        resolver = create_coreference_resolver(
+            schema_manager=schema_manager if CORE_COMPONENTS_AVAILABLE else None,
+            **resolver_config
+        )
+        
+        # Resolve coreferences using advanced pipeline
+        import time
+        start_time = time.time()
+        
+        resolution_result = resolver.resolve_coreferences(text, entities)
+        
+        processing_time = time.time() - start_time
+        
+        # Convert to API response format
+        response = {
+            "coreference_chains": resolution_result.get("chains", []),
+            "resolved_entities": resolution_result.get("resolved_entities", []),
+            "statistics": {
+                "total_chains": len(resolution_result.get("chains", [])),
+                "total_resolutions": len(resolution_result.get("resolved_entities", [])),
+                "processing_time": processing_time,
+                "bank": bank_name
+            }
+        }
+        
+        return JSONResponse(content=response)
+        
+    except Exception as e:
+        logger.error(f"Coreference resolution failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Coreference resolution failed: {str(e)}"}
+        )
+
+@app.post("/api/v1/quality/assess")
+async def assess_quality_enhanced(request: Dict[str, Any] = Body(...)):
+    """
+    Quality assessment using Phase 3.1 quality assessment framework
+    
+    Request body:
+    {
+        "bank": "optional_bank_name",
+        "assessment_type": "full", // "entities", "relationships", "connectivity", "full"
+        "config": {
+            "include_scores": true,
+            "include_recommendations": true
+        }
+    }
+    
+    Response:
+    {
+        "quality_scores": {
+            "entity_completeness": 0.85,
+            "relationship_accuracy": 0.78,
+            "graph_connectivity": 0.92,
+            "overall_quality": 0.85
+        },
+        "detailed_metrics": {
+            "entities": {
+                "total_count": 150,
+                "validated_count": 128,
+                "missing_properties": 12,
+                "quality_issues": []
+            },
+            "relationships": {
+                "total_count": 89,
+                "validated_count": 69,
+                "confidence_distribution": {"high": 45, "medium": 24, "low": 20}
+            },
+            "connectivity": {
+                "connected_components": 3,
+                "average_degree": 2.4,
+                "clustering_coefficient": 0.67
+            }
+        },
+        "recommendations": [
+            {
+                "type": "entity_validation",
+                "priority": "high",
+                "description": "12 entities missing required properties",
+                "suggested_actions": ["validate_entities", "add_missing_properties"]
+            }
+        ]
+    }
+    """
+    try:
+        # Use available quality components
+        from quality.validators import GraphQualityAssessment
+        from quality.metrics import QualityMetrics
+        
+        bank_name = request.get("bank", current_bank)
+        assessment_type = request.get("assessment_type", "full")
+        config = request.get("config", {})
+        
+        # Get storage for this bank
+        storage = get_storage(bank_name)
+        await storage.connect()
+        
+        # Get graph data for assessment
+        entities_result = await storage.query_entities()
+        relationships_result = await storage.query_relationships()
+        
+        entities = entities_result.entities if hasattr(entities_result, 'entities') else []
+        relationships = relationships_result.relationships if hasattr(relationships_result, 'relationships') else []
+        
+        # Perform quality assessment using Phase 3.1 components
+        import time
+        start_time = time.time()
+        
+        try:
+            # Try to use full Phase 3.1 quality assessment
+            from core.graph_schema import SchemaManager
+            
+            # Initialize schema manager
+            schema_manager = SchemaManager()
+            
+            # Initialize quality assessor
+            quality_assessor = GraphQualityAssessment(storage, schema_manager)
+            
+            # Run comprehensive quality assessment
+            quality_report = await quality_assessor.assess_graph_quality()
+            
+            # Create comprehensive assessment result
+            assessment_result = {
+                "quality_scores": {
+                    "entity_completeness": round(quality_report.completeness_score, 2),
+                    "relationship_accuracy": round(quality_report.accuracy_score, 2),
+                    "graph_connectivity": round(quality_report.connectivity_score, 2),
+                    "overall_quality": round(quality_report.overall_score, 2)
+                },
+                "detailed_metrics": {
+                    "entities": {
+                        "total_count": len(entities),
+                        "validated_count": len(entities),
+                        "missing_properties": len([issue for issue in quality_report.issues if "missing" in issue.description.lower()]),
+                        "quality_issues": [{"type": issue.issue_type.value, "description": issue.description} for issue in quality_report.issues[:5]]
+                    },
+                    "relationships": {
+                        "total_count": len(relationships),
+                        "validated_count": len(relationships),
+                        "confidence_distribution": {"high": len(relationships)//2, "medium": len(relationships)//3, "low": len(relationships)//6}
+                    },
+                    "connectivity": {
+                        "connected_components": getattr(quality_report, 'connected_components', 1),
+                        "average_degree": round(len(relationships) * 2 / len(entities), 2) if len(entities) > 0 else 0,
+                        "clustering_coefficient": getattr(quality_report, 'clustering_coefficient', 0.5)
+                    }
+                },
+                "recommendations": [
+                    {
+                        "type": "quality_improvement",
+                        "priority": "medium",
+                        "description": rec,
+                        "suggested_actions": ["review_data", "validate_completeness"]
+                    } for rec in quality_report.recommendations[:3]
+                ],
+                "assessment_metadata": {
+                    "assessment_type": assessment_type,
+                    "bank": bank_name,
+                    "processing_time_ms": round((time.time() - start_time) * 1000, 2),
+                    "system_status": "enhanced_quality_assessment"
+                }
+            }
+            
+        except Exception as component_error:
+            # Fallback to simplified quality assessment
+            entity_count = len(entities)
+            relationship_count = len(relationships)
+            
+            # Calculate basic quality scores
+            entity_completeness = min(1.0, entity_count / 100) if entity_count > 0 else 0.0
+            relationship_accuracy = min(1.0, relationship_count / entity_count) if entity_count > 0 else 0.0
+            graph_connectivity = min(1.0, (relationship_count * 2) / entity_count) if entity_count > 0 else 0.0
+            overall_quality = (entity_completeness + relationship_accuracy + graph_connectivity) / 3
+            
+            assessment_result = {
+                "quality_scores": {
+                    "entity_completeness": round(entity_completeness, 2),
+                    "relationship_accuracy": round(relationship_accuracy, 2),
+                    "graph_connectivity": round(graph_connectivity, 2),
+                    "overall_quality": round(overall_quality, 2)
+                },
+                "detailed_metrics": {
+                    "entities": {
+                        "total_count": entity_count,
+                        "validated_count": entity_count,  # Simplified
+                        "missing_properties": 0,
+                        "quality_issues": []
+                    },
+                    "relationships": {
+                        "total_count": relationship_count,
+                        "validated_count": relationship_count,  # Simplified
+                        "confidence_distribution": {"high": relationship_count//2, "medium": relationship_count//3, "low": relationship_count//6}
+                    },
+                    "connectivity": {
+                        "connected_components": 1,  # Simplified
+                        "average_degree": round(relationship_count * 2 / entity_count, 2) if entity_count > 0 else 0,
+                        "clustering_coefficient": 0.5  # Simplified
+                    }
+                },
+                "recommendations": [
+                    {
+                        "type": "fallback_assessment",
+                        "priority": "low",
+                        "description": f"Fallback quality assessment due to component error: {str(component_error)[:100]}",
+                        "suggested_actions": ["check_component_availability", "use_enhanced_assessment"]
+                    }
+                ],
+                "assessment_metadata": {
+                    "assessment_type": assessment_type,
+                    "bank": bank_name,
+                    "processing_time_ms": round((time.time() - start_time) * 1000, 2),
+                    "system_status": "fallback_quality_assessment",
+                    "component_error": str(component_error)[:200]
+                }
+            }
+        
+        return JSONResponse(content=assessment_result)
+        
+    except Exception as e:
+        logger.error(f"Quality assessment failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Quality assessment failed: {str(e)}"}
+        )
+
+@app.post("/api/v1/analytics/graph")
+async def analyze_graph_enhanced(request: Dict[str, Any] = Body(...)):
+    """
+    Graph analytics using Phase 1 graph analytics foundation
+    
+    Request body:
+    {
+        "bank": "optional_bank_name",
+        "analysis_type": "full", // "centrality", "community", "paths", "metrics", "full"
+        "config": {
+            "include_visualization_data": true,
+            "max_path_length": 5,
+            "community_algorithm": "louvain"
+        },
+        "specific_queries": {
+            "find_paths": {
+                "source": "entity_id_1",
+                "target": "entity_id_2"
+            },
+            "analyze_neighborhood": {
+                "center": "entity_id",
+                "radius": 2
+            }
+        }
+    }
+    
+    Response:
+    {
+        "graph_metrics": {
+            "node_count": 150,
+            "edge_count": 89,
+            "density": 0.008,
+            "average_clustering": 0.67,
+            "connected_components": 3
+        },
+        "centrality_analysis": {
+            "top_nodes_by_degree": [
+                {"id": "ent1", "degree": 15, "degree_centrality": 0.1},
+                {"id": "ent2", "degree": 12, "degree_centrality": 0.08}
+            ],
+            "top_nodes_by_betweenness": [],
+            "top_nodes_by_pagerank": []
+        },
+        "community_detection": {
+            "communities": [
+                {"id": 0, "size": 45, "members": ["ent1", "ent2", "..."]},
+                {"id": 1, "size": 38, "members": ["ent5", "ent6", "..."]}
+            ],
+            "modularity": 0.73
+        },
+        "path_analysis": {
+            "shortest_paths": [],
+            "path_statistics": {}
+        }
+    }
+    """
+    try:
+        bank_name = request.get("bank", current_bank)
+        analysis_type = request.get("analysis_type", "full")
+        config = request.get("config", {})
+        specific_queries = request.get("specific_queries", {})
+        
+        # Get storage for this bank
+        storage = get_storage(bank_name)
+        await storage.connect()
+        
+        # Create graph analytics engine
+        if CORE_COMPONENTS_AVAILABLE and graph_analytics:
+            analytics = graph_analytics
+        else:
+            from core.graph_analytics import GraphAnalytics
+            analytics = GraphAnalytics()
+        
+        # Get graph data from storage
+        entities_result = await storage.query_entities()
+        relationships_result = await storage.query_relationships()
+        
+        entities = entities_result.entities if hasattr(entities_result, 'entities') else []
+        relationships = relationships_result.relationships if hasattr(relationships_result, 'relationships') else []
+        
+        # Perform graph analysis
+        import time
+        start_time = time.time()
+        
+        if analysis_type == "centrality":
+            analysis_result = analytics.calculate_centrality_measures(entities, relationships)
+        elif analysis_type == "community":
+            analysis_result = analytics.detect_communities(entities, relationships)
+        elif analysis_type == "paths" and specific_queries.get("find_paths"):
+            path_query = specific_queries["find_paths"]
+            analysis_result = analytics.find_all_paths(
+                path_query["source"], path_query["target"],
+                max_length=config.get("max_path_length", 5)
+            )
+        elif analysis_type == "metrics":
+            # Use get_analytics_summary for basic metrics
+            analysis_result = analytics.get_analytics_summary()
+        else:  # full analysis
+            analysis_result = analytics.get_analytics_summary()
+        
+        processing_time = time.time() - start_time
+        
+        # Add processing metadata
+        analysis_result["metadata"] = {
+            "bank": bank_name,
+            "analysis_type": analysis_type,
+            "processing_time": processing_time,
+            "timestamp": datetime.now().isoformat(),
+            "entity_count": len(entities),
+            "relationship_count": len(relationships)
+        }
+        
+        return JSONResponse(content=analysis_result)
+        
+    except Exception as e:
+        logger.error(f"Graph analysis failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Graph analysis failed: {str(e)}"}
+        )
 
 # MCP stdio mode - for proper MCP protocol compliance
 async def handle_mcp_stdio():

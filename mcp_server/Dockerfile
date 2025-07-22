@@ -21,11 +21,16 @@ RUN pip install --upgrade pip --disable-pip-version-check --no-warn-script-locat
     pip install -r requirements.txt --disable-pip-version-check --no-warn-script-location --root-user-action=ignore && \
     python -m spacy download en_core_web_sm
 
-# Copy application files and set ownership
+# Copy application files and Phase 1-3 components
 COPY main.py ./
 COPY knowledge_graph_processor.py ./
 COPY enhanced_knowledge_processor.py ./
 COPY templates/ ./templates/
+COPY core/ ./core/
+COPY storage/ ./storage/
+COPY extraction/ ./extraction/
+COPY quality/ ./quality/
+COPY migration/ ./migration/
 RUN chown -R appuser:appuser /app
 
 # Switch to non-root user
