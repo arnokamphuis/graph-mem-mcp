@@ -59,13 +59,21 @@ Based on the analysis of your current knowledge graph implementation and industr
 - ✅ **graph_analytics.py**: Path finding, centrality measures, graph metrics working
 
 #### Minor Issues:
-- ⚠️ Pydantic V2 deprecation warnings (non-breaking)
-- ⚠️ Community detection warnings (non-breaking)
 
 All core components implemented, tested, and functional:
 
+
+
 #### 1. Graph Schema Management - COMPLETED
-**File:** `mcp_server/core/graph_schema.py`
+**Root Cause:**
+When the modern storage system is enabled (`STORAGE_AVAILABLE`), the bank deletion logic only removes the bank from the legacy `memory_banks` dictionary, but does not remove it from the `storage_backends` dictionary. As a result, `/banks/list` continues to enumerate deleted banks, causing them to persist in the visualization interface.
+
+**Required Fix:**
+Update the backend bank deletion logic to also remove the bank from `storage_backends` when `STORAGE_AVAILABLE` is `True`. This will ensure that deleted banks are no longer listed or visualized.
+
+**Status:**
+Identified and documented. Pending backend code update to resolve.
+
 
 **Implemented Features:**
 - Complete entity type hierarchies with inheritance

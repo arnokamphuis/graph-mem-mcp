@@ -64,26 +64,12 @@ except ImportError as e:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Modern startup only
-    # Load banks from disk
+    # Load banks from disk (if needed, but only for storage_backends)
     try:
-        if MEMORY_FILE.exists():
-            with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-                banks_data = json.load(f)
-            # Initialize storage backends and memory_banks for each bank
-            for bank_name, bank_data in banks_data.items():
-                storage_backends[bank_name] = create_graph_store("memory")
-                # Ensure memory_banks entry exists for each bank
-                if bank_name not in memory_banks:
-                    memory_banks[bank_name] = {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}
-            logger.info(f"Loaded {len(banks_data)} banks from disk.")
-        else:
-            logger.warning("No memory_banks.json found, starting with empty banks.")
         # Ensure default bank exists
         if "default" not in storage_backends:
             storage_backends["default"] = create_graph_store("memory")
             logger.info("Created default bank.")
-        if "default" not in memory_banks:
-            memory_banks["default"] = {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}
         logger.info("Application startup complete.")
     except Exception as e:
         logger.error(f"Error during bank loading: {e}")
@@ -104,50 +90,32 @@ MEMORY_FILE = DATA_DIR / "memory_banks.json"
 # Ensure data directory exists
 DATA_DIR.mkdir(exist_ok=True)
 
-# PHASE 4.1.2: Initialize new storage system
-memory_banks = {}  # Legacy fallback - always initialized
-current_bank = "default"
 
-if STORAGE_AVAILABLE:
-    # Initialize storage backends for each memory bank
-    storage_backends: Dict[str, MemoryStore] = {}
-    
-    # Initialize core components if available
-    if CORE_COMPONENTS_AVAILABLE:
-        schema_manager = SchemaManager()
-        entity_resolver = EntityResolver()
-        graph_analytics = GraphAnalytics()
-        logger.info("Core knowledge graph components initialized")
-    else:
-        schema_manager = None
-        entity_resolver = None
-        graph_analytics = None
-        
-    def get_storage(bank_name: str = None) -> MemoryStore:
-        """Get or create storage backend for a specific bank"""
-        if bank_name is None:
-            bank_name = current_bank
-            
-        if bank_name not in storage_backends:
-            storage_backends[bank_name] = create_graph_store("memory")
-            logger.info(f"Created new storage backend for bank: {bank_name}")
-            
-        # Ensure legacy fallback exists for this bank
-        if bank_name not in memory_banks:
-            memory_banks[bank_name] = {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}
-            
-        return storage_backends[bank_name]
-    
-    logger.info("Phase 3.2 storage system initialized successfully")
+# PHASE 4.1.2: Modern storage system only
+current_bank = "default"
+storage_backends: Dict[str, MemoryStore] = {}
+
+# Initialize core components if available
+if CORE_COMPONENTS_AVAILABLE:
+    schema_manager = SchemaManager()
+    entity_resolver = EntityResolver()
+    graph_analytics = GraphAnalytics()
+    logger.info("Core knowledge graph components initialized")
 else:
-    # Legacy fallback system
-    memory_banks = {"default": {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}}
-    storage_backends = None
     schema_manager = None
     entity_resolver = None
     graph_analytics = None
-    
-    logger.warning("Using legacy memory_banks system - storage backend not available")
+
+def get_storage(bank_name: str = None) -> MemoryStore:
+    """Get or create storage backend for a specific bank"""
+    if bank_name is None:
+        bank_name = current_bank
+    if bank_name not in storage_backends:
+        storage_backends[bank_name] = create_graph_store("memory")
+        logger.info(f"Created new storage backend for bank: {bank_name}")
+    return storage_backends[bank_name]
+
+logger.info("Phase 3.2 storage system initialized successfully")
 
 def event_stream():
     # Send a keepalive event every 5 seconds
@@ -405,6 +373,7 @@ def serialize_legacy_data(legacy_data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # Bank management endpoints
+
 @app.post("/banks/create")
 def create_bank(op: BankOp):
     """
@@ -412,20 +381,12 @@ def create_bank(op: BankOp):
     Request body: {"bank": "bank_name"}
     Response: {"status": "success", "bank": "bank_name"}
     """
-    if op.bank in memory_banks:
+    if op.bank in storage_backends:
         return {"status": "error", "message": "Bank already exists."}
-    
     # Create the new bank
-    memory_banks[op.bank] = {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}
-    
-    # Save to disk
-    try:
-        save_memory_banks()
-    except Exception as e:
-        logger.warning(f"Could not save memory banks: {e}")
-        # Continue anyway - bank is created in memory
-    
+    storage_backends[op.bank] = create_graph_store("memory")
     return {"status": "success", "bank": op.bank}
+
 
 @app.post("/banks/select")
 def select_bank(op: BankOp):
@@ -435,12 +396,11 @@ def select_bank(op: BankOp):
     Response: {"status": "success", "selected": "bank_name"}
     """
     global current_bank
-    if op.bank not in memory_banks:
+    if op.bank not in storage_backends:
         return {"status": "error", "message": "Bank does not exist."}
     current_bank = op.bank
-    # No need to save for selection - it's just runtime state
     return {"status": "success", "selected": current_bank}
-    return {"status": "success", "selected": current_bank}
+
 
 @app.get("/banks/list")
 def list_banks():
@@ -448,15 +408,8 @@ def list_banks():
     List all memory banks and show the current active bank.
     Response: {"banks": ["bank1", "bank2"], "current": "bank_name"}
     """
-    # Use storage-based system if available, fallback to legacy
-    if STORAGE_AVAILABLE and storage_backends:
-        return {"banks": list(storage_backends.keys()), "current": current_bank}
-    else:
-        # Fallback to legacy system
-        if 'memory_banks' in globals():
-            return {"banks": list(memory_banks.keys()), "current": current_bank}
-        else:
-            return {"banks": ["default"], "current": current_bank}
+    return {"banks": list(storage_backends.keys()), "current": current_bank}
+
 
 @app.post("/banks/delete")
 def delete_bank(op: BankOp):
@@ -468,12 +421,11 @@ def delete_bank(op: BankOp):
     global current_bank
     if op.bank == "default":
         return {"status": "error", "message": "Cannot delete default bank."}
-    if op.bank not in memory_banks:
+    if op.bank not in storage_backends:
         return {"status": "error", "message": "Bank does not exist."}
-    del memory_banks[op.bank]
+    del storage_backends[op.bank]
     if current_bank == op.bank:
         current_bank = "default"
-    save_memory_banks()  # Persist the change
     return {"status": "success", "deleted": op.bank, "current": current_bank}
 
 @app.post("/banks/clear")
@@ -1103,9 +1055,11 @@ def get_visualizations(bank: str = Query(None)):
     b = bank or current_bank
     nodes = []
     edges = []
-    
-    # Convert entities to visualization nodes
-    for entity_id, entity in memory_banks[b]["nodes"].items():
+    if b not in storage_backends:
+        return {"error": f"Bank '{b}' not found"}
+    store = storage_backends[b]
+    # Get all entities (nodes)
+    for entity_id, entity in store.entities.items():
         nodes.append({
             "id": entity_id,
             "label": entity_id,
@@ -1115,10 +1069,8 @@ def get_visualizations(bank: str = Query(None)):
             "created_at": entity.data.get("created_at", ""),
             "updated_at": entity.data.get("updated_at", "")
         })
-    
-    # Convert relationships to visualization edges
-    for edge in memory_banks[b]["edges"]:
-        # Try relation_type first (from enhanced KG), fall back to type, then default
+    # Get all relationships (edges)
+    for edge in store.relationships:
         relation_type = edge.data.get("relation_type") or edge.data.get("type", "related_to")
         edges.append({
             "source": edge.source,
@@ -1126,7 +1078,6 @@ def get_visualizations(bank: str = Query(None)):
             "type": relation_type,
             "label": relation_type
         })
-    
     return {
         "bank": b,
         "nodes": nodes,
@@ -1144,7 +1095,7 @@ def visualize_graph(bank: str):
     """
     Serve interactive graph visualization page for a specific memory bank.
     """
-    if bank not in memory_banks:
+    if bank not in storage_backends:
         return JSONResponse(content={"error": "Bank not found"}, status_code=404)
 
     try:
@@ -1175,8 +1126,7 @@ def visualize_graph(bank: str):
 async def root():
     """Root endpoint - redirects to visualization"""
     # Default to first available bank or 'default'
-    default_bank = 'default' if 'default' in memory_banks else list(memory_banks.keys())[0] if memory_banks else 'default'
-    
+    default_bank = 'default' if 'default' in storage_backends else list(storage_backends.keys())[0] if storage_backends else 'default'
     # Render the enhanced visualization page
     return visualize_graph(default_bank)
 
