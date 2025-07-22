@@ -43,12 +43,12 @@ def test_modern_kg_processor_direct():
                 
             print(f"\nExtracted {len(result['relationships'])} relationships:")
             for rel in result['relationships'][:5]:  # Show first 5
-                print(f"  {rel.source} --{rel.relation_type}--> {rel.target} (confidence: {rel.confidence:.2f})")
+            print(f"  {rel.source} --{rel.relationship_type}--> {rel.target} (confidence: {rel.confidence:.2f})")
                 
             print(f"\nStats: {result['stats']}")
             
             # Check relationship diversity
-            relationship_types = [rel.relation_type for rel in result['relationships']]
+            relationship_types = [rel.relationship_type for rel in result['relationships']]
             related_to_count = relationship_types.count('related_to')
             total_relationships = len(relationship_types)
             
@@ -105,8 +105,8 @@ def test_relationship_diversity():
             print(f"\nTesting: {text}")
             result = processor.construct_knowledge_graph(text, [])
             for rel in result['relationships']:
-                all_relationships.append(rel.relation_type)
-                print(f"  {rel.source} --{rel.relation_type}--> {rel.target}")
+                all_relationships.append(rel.relationship_type)
+                print(f"  {rel.source} --{rel.relationship_type}--> {rel.target}")
         
         # Analyze overall diversity
         relationship_counts = {}

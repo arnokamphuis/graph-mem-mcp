@@ -63,22 +63,33 @@ except ImportError as e:
 # Async context manager for application lifecycle
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    if STORAGE_AVAILABLE:
-        await load_memory_banks()
-        logger.info("Application startup complete with storage backends")
-    else:
-        # Use async version even for legacy system to avoid event loop conflicts
-        await load_memory_banks_legacy()
-        logger.info("Application startup complete with legacy system")
+    # Modern startup only
+    # Load banks from disk
+    try:
+        if MEMORY_FILE.exists():
+            with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+                banks_data = json.load(f)
+            # Initialize storage backends for each bank
+            for bank_name, bank_data in banks_data.items():
+                storage_backends[bank_name] = create_graph_store("memory")
+                # Optionally, load nodes/edges/observations/reasoning_steps into backend here
+            logger.info(f"Loaded {len(banks_data)} banks from disk.")
+        else:
+            logger.warning("No memory_banks.json found, starting with empty banks.")
+        # Ensure default bank exists
+        if "default" not in storage_backends:
+            storage_backends["default"] = create_graph_store("memory")
+            logger.info("Created default bank.")
+        logger.info("Application startup complete.")
+    except Exception as e:
+        logger.error(f"Error during bank loading: {e}")
     yield
     # Shutdown
-    if STORAGE_AVAILABLE and storage_backends:
-        for storage in storage_backends.values():
-            try:
-                await storage.disconnect()
-            except Exception as e:
-                logger.error(f"Error closing storage: {e}")
+    for storage in storage_backends.values():
+        try:
+            await storage.disconnect()
+        except Exception as e:
+            logger.error(f"Error closing storage: {e}")
 
 app = FastAPI(lifespan=lifespan)
 

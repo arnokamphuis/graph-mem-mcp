@@ -40,7 +40,7 @@ class Relationship:
     """Represents a relationship between entities"""
     source: str
     target: str
-    relation_type: str
+    relationship_type: str
     confidence: float
     context: str
     dependency_path: str = ""
@@ -219,7 +219,7 @@ class ModernKnowledgeGraphProcessor:
             return Relationship(
                 source=entity1.name,
                 target=entity2.name,
-                relation_type=relation_type,
+                relationship_type=relation_type,
                 confidence=confidence,
                 context=sent.text,
                 dependency_path=" -> ".join([t.text + "(" + t.dep_ + ")" for t in path])

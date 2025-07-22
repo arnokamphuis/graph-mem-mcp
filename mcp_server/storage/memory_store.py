@@ -334,6 +334,16 @@ class MemoryStore(GraphStore):
             # Clear query cache
             self.query_cache.clear()
             
+            # Ensure 'relationship_type' field is present and correct
+            # If 'relation_type' exists, use it; otherwise, default to 'unknown'
+            if 'relationship_type' not in rel_data:
+                if 'relation_type' in rel_data:
+                    rel_data['relationship_type'] = rel_data['relation_type']
+                else:
+                    rel_data['relationship_type'] = 'unknown'
+            # Remove any stray 'relation_type' to avoid confusion
+            if 'relation_type' in rel_data:
+                rel_data.pop('relation_type')
             return True
             
         except Exception as e:
