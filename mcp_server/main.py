@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # PHASE 4.1.1: Import new storage system
 try:
-    from storage import create_memory_store, GraphStore, MemoryStore, StorageConfig
+    from storage import create_graph_store, GraphStore, MemoryStore, StorageConfig
     STORAGE_AVAILABLE = True
     logger.info("Phase 3.2 storage system loaded successfully")
 except ImportError as e:
@@ -114,7 +114,7 @@ if STORAGE_AVAILABLE:
             bank_name = current_bank
             
         if bank_name not in storage_backends:
-            storage_backends[bank_name] = create_memory_store()
+            storage_backends[bank_name] = create_graph_store("memory")
             logger.info(f"Created new storage backend for bank: {bank_name}")
             
         # Ensure legacy fallback exists for this bank
@@ -249,15 +249,14 @@ def deserialize_memory_banks(data):
 
 # PHASE 4.1.3: Updated persistence functions for new storage system
 def save_memory_banks():
-    """Save memory banks to persistent storage - supports both new and legacy systems"""
+    """Save memory banks to persistent storage - modern storage system handles persistence automatically"""
     try:
         if STORAGE_AVAILABLE and storage_backends:
             # New storage system - data is automatically persisted
-            # For now, we'll still save a legacy-compatible format for backup
-            legacy_data = convert_storage_to_legacy()
-            serialized_data = serialize_legacy_data(legacy_data)
+            logger.info("Memory banks using modern storage system - persistence automatic")
+            return
         else:
-            # Legacy system
+            # Legacy system fallback
             serialized_data = serialize_memory_banks()
         
         # Ensure DATA_DIR exists and is writable
@@ -382,99 +381,6 @@ def load_memory_banks_sync():
         asyncio.set_event_loop(loop)
     
     return loop.run_until_complete(load_memory_banks())
-
-async def convert_storage_to_legacy_async() -> Dict[str, Any]:
-    """Convert new storage system data to legacy format for backup (async version)"""
-    legacy_banks = {}
-    
-    if not storage_backends:
-        return {"default": {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}}
-    
-    for bank_name, storage in storage_backends.items():
-        try:
-            # Use async query methods directly
-            try:
-                entities_result = await storage.query_entities()
-                relationships_result = await storage.query_relationships()
-                
-                all_entities = entities_result.entities if hasattr(entities_result, 'entities') else []
-                all_relationships = relationships_result.relationships if hasattr(relationships_result, 'relationships') else []
-            except Exception as e:
-                logger.warning(f"Failed to query storage for bank {bank_name}: {e}")
-                all_entities = []
-                all_relationships = []
-            
-            nodes = {}
-            edges = []
-            observations = []
-            reasoning_steps = []
-            
-            # Convert entities
-            for entity in all_entities:
-                if hasattr(entity, 'type'):
-                    entity_type = entity.type
-                    entity_id = entity.id
-                    entity_data = entity.properties if hasattr(entity, 'properties') else {}
-                else:
-                    entity_type = entity.get("type", "node")
-                    entity_id = entity.get("id")
-                    entity_data = entity.get("properties", {})
-                
-                if entity_type == "observation":
-                    observations.append({
-                        "id": entity_id,
-                        "entity_id": entity_data.get("entity_id"),
-                        "content": entity_data.get("content"),
-                        "timestamp": entity_data.get("timestamp")
-                    })
-                elif entity_type == "reasoning_step":
-                    reasoning_steps.append({
-                        "id": entity_id,
-                        "description": entity_data.get("description"),
-                        "status": entity_data.get("status", "pending"),
-                        "timestamp": entity_data.get("timestamp"),
-                        "related_entities": entity_data.get("related_entities", []),
-                        "related_relations": entity_data.get("related_relations", [])
-                    })
-                else:
-                    nodes[entity_id] = {
-                        "id": entity_id,
-                        "type": entity_type,
-                        "data": entity_data
-                    }
-            
-            # Convert relationships
-            for relationship in all_relationships:
-                if hasattr(relationship, 'type'):
-                    rel_data = {
-                        "id": relationship.id,
-                        "source": relationship.source_id,
-                        "target": relationship.target_id,
-                        "type": relationship.type,
-                        "data": relationship.properties if hasattr(relationship, 'properties') else {}
-                    }
-                else:
-                    rel_data = {
-                        "id": relationship.get("id"),
-                        "source": relationship.get("source_id"),
-                        "target": relationship.get("target_id"),
-                        "type": relationship.get("type", "relation"),
-                        "data": relationship.get("properties", {})
-                    }
-                edges.append(rel_data)
-            
-            legacy_banks[bank_name] = {
-                "nodes": nodes,
-                "edges": edges,
-                "observations": observations,
-                "reasoning_steps": reasoning_steps
-            }
-            
-        except Exception as e:
-            logger.warning(f"Failed to convert bank {bank_name} to legacy format: {e}")
-            legacy_banks[bank_name] = {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}
-    
-    return legacy_banks
 
 def serialize_legacy_data(legacy_data: Dict[str, Any]) -> Dict[str, Any]:
     """Serialize legacy data format for JSON storage"""
