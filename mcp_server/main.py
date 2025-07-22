@@ -69,10 +69,12 @@ async def lifespan(app: FastAPI):
         if MEMORY_FILE.exists():
             with open(MEMORY_FILE, "r", encoding="utf-8") as f:
                 banks_data = json.load(f)
-            # Initialize storage backends for each bank
+            # Initialize storage backends and memory_banks for each bank
             for bank_name, bank_data in banks_data.items():
                 storage_backends[bank_name] = create_graph_store("memory")
-                # Optionally, load nodes/edges/observations/reasoning_steps into backend here
+                # Ensure memory_banks entry exists for each bank
+                if bank_name not in memory_banks:
+                    memory_banks[bank_name] = {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}
             logger.info(f"Loaded {len(banks_data)} banks from disk.")
         else:
             logger.warning("No memory_banks.json found, starting with empty banks.")
@@ -80,6 +82,8 @@ async def lifespan(app: FastAPI):
         if "default" not in storage_backends:
             storage_backends["default"] = create_graph_store("memory")
             logger.info("Created default bank.")
+        if "default" not in memory_banks:
+            memory_banks["default"] = {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}
         logger.info("Application startup complete.")
     except Exception as e:
         logger.error(f"Error during bank loading: {e}")
