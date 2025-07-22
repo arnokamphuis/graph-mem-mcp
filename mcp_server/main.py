@@ -17,6 +17,26 @@ from pathlib import Path
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
+# PHASE 4.1.1: Import new storage system
+try:
+    from storage import create_memory_store, GraphStore, MemoryStore, StorageConfig
+    STORAGE_AVAILABLE = True
+    logger.info("Phase 3.2 storage system loaded successfully")
+except ImportError as e:
+    logger.warning(f"Storage system not available, using legacy fallback: {e}")
+    STORAGE_AVAILABLE = False
+
+# Import Phase 1-3 core components for enhanced knowledge graph
+try:
+    from core.graph_schema import SchemaManager, EntityInstance, RelationshipInstance
+    from core.entity_resolution import EntityResolver
+    from core.graph_analytics import GraphAnalytics
+    CORE_COMPONENTS_AVAILABLE = True
+    logger.info("Core knowledge graph components loaded successfully")
+except ImportError as e:
+    logger.warning(f"Core components not available: {e}")
+    CORE_COMPONENTS_AVAILABLE = False
+
 # Modern Knowledge Graph Processing
 try:
     from knowledge_graph_processor import create_knowledge_graph_processor
@@ -47,6 +67,46 @@ MEMORY_FILE = DATA_DIR / "memory_banks.json"
 
 # Ensure data directory exists
 DATA_DIR.mkdir(exist_ok=True)
+
+# PHASE 4.1.2: Initialize new storage system
+if STORAGE_AVAILABLE:
+    # Initialize storage backends for each memory bank
+    storage_backends: Dict[str, MemoryStore] = {}
+    current_bank = "default"
+    
+    # Initialize core components if available
+    if CORE_COMPONENTS_AVAILABLE:
+        schema_manager = SchemaManager()
+        entity_resolver = EntityResolver()
+        graph_analytics = GraphAnalytics()
+        logger.info("Core knowledge graph components initialized")
+    else:
+        schema_manager = None
+        entity_resolver = None
+        graph_analytics = None
+        
+    def get_storage(bank_name: str = None) -> MemoryStore:
+        """Get or create storage backend for a specific bank"""
+        if bank_name is None:
+            bank_name = current_bank
+            
+        if bank_name not in storage_backends:
+            storage_backends[bank_name] = create_memory_store()
+            logger.info(f"Created new storage backend for bank: {bank_name}")
+            
+        return storage_backends[bank_name]
+    
+    logger.info("Phase 3.2 storage system initialized successfully")
+else:
+    # Legacy fallback system
+    memory_banks = {"default": {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}}
+    current_bank = "default"
+    storage_backends = None
+    schema_manager = None
+    entity_resolver = None
+    graph_analytics = None
+    
+    logger.warning("Using legacy memory_banks system - storage backend not available")
 
 def event_stream():
     # Send a keepalive event every 5 seconds
@@ -115,9 +175,7 @@ class TextIngest(BaseModel):
 class BankOp(BaseModel):
     bank: str
 
-# Memory banks: each bank has its own nodes, edges, observations, reasoning_steps
-memory_banks = {"default": {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}}
-current_bank = "default"
+# PHASE 4.1.2: Legacy storage initialization moved to conditional block above
 
 # Persistence functions
 def serialize_memory_banks():
@@ -163,10 +221,18 @@ def deserialize_memory_banks(data):
             "reasoning_steps": [ReasoningStep(**step_data) for step_data in bank_data["reasoning_steps"]]
         }
 
+# PHASE 4.1.3: Updated persistence functions for new storage system
 def save_memory_banks():
-    """Save memory banks to persistent storage"""
+    """Save memory banks to persistent storage - supports both new and legacy systems"""
     try:
-        serialized_data = serialize_memory_banks()
+        if STORAGE_AVAILABLE and storage_backends:
+            # New storage system - data is automatically persisted
+            # For now, we'll still save a legacy-compatible format for backup
+            legacy_data = convert_storage_to_legacy()
+            serialized_data = serialize_legacy_data(legacy_data)
+        else:
+            # Legacy system
+            serialized_data = serialize_memory_banks()
         
         # Ensure DATA_DIR exists and is writable
         try:
@@ -210,28 +276,132 @@ def save_memory_banks():
         # Continue execution even if save fails - data persists in memory
 
 def load_memory_banks():
-    """Load memory banks from persistent storage"""
+    """Load memory banks from persistent storage - supports both new and legacy systems"""
     global memory_banks, current_bank
     try:
         if MEMORY_FILE.exists():
             with open(MEMORY_FILE, 'r') as f:
                 data = json.load(f)
-            deserialize_memory_banks(data)
+            
+            if STORAGE_AVAILABLE and storage_backends is not None:
+                # New storage system - migrate legacy data
+                from migration.legacy_migrator import migrate_legacy_data
+                if migrate_legacy_data(data, storage_backends, schema_manager):
+                    logger.info("Successfully migrated legacy data to new storage system")
+                else:
+                    logger.warning("Failed to migrate legacy data, using legacy system")
+                    deserialize_memory_banks(data)
+            else:
+                # Legacy system
+                deserialize_memory_banks(data)
+                
             logger.debug(f"Memory banks loaded from {MEMORY_FILE}")
-            logger.debug(f"Loaded banks: {list(memory_banks.keys())}")
+            if not STORAGE_AVAILABLE:
+                logger.debug(f"Loaded banks: {list(memory_banks.keys())}")
         else:
             logger.debug("No existing memory file found, starting with default banks")
-            memory_banks = {"default": {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}}
+            if not STORAGE_AVAILABLE:
+                memory_banks = {"default": {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}}
         
         # Ensure current_bank exists
-        if current_bank not in memory_banks:
+        if not STORAGE_AVAILABLE and current_bank not in memory_banks:
             current_bank = "default"
             
     except Exception as e:
         logger.error(f"Failed to load memory banks: {e}")
         logger.info("Starting with default memory banks")
-        memory_banks = {"default": {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}}
-        current_bank = "default"
+        if not STORAGE_AVAILABLE:
+            memory_banks = {"default": {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}}
+            current_bank = "default"
+
+def convert_storage_to_legacy() -> Dict[str, Any]:
+    """Convert new storage system data to legacy format for backup"""
+    legacy_banks = {}
+    
+    if not storage_backends:
+        return {"default": {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}}
+    
+    for bank_name, storage in storage_backends.items():
+        try:
+            # Get all entities and relationships
+            all_entities = storage.get_all_entities()
+            all_relationships = storage.get_all_relationships()
+            
+            nodes = {}
+            edges = []
+            observations = []
+            reasoning_steps = []
+            
+            # Convert entities
+            for entity in all_entities:
+                if hasattr(entity, 'type'):
+                    entity_type = entity.type
+                    entity_id = entity.id
+                    entity_data = entity.properties if hasattr(entity, 'properties') else {}
+                else:
+                    entity_type = entity.get("type", "node")
+                    entity_id = entity.get("id")
+                    entity_data = entity.get("properties", {})
+                
+                if entity_type == "observation":
+                    observations.append({
+                        "id": entity_id,
+                        "entity_id": entity_data.get("entity_id"),
+                        "content": entity_data.get("content"),
+                        "timestamp": entity_data.get("timestamp")
+                    })
+                elif entity_type == "reasoning_step":
+                    reasoning_steps.append({
+                        "id": entity_id,
+                        "description": entity_data.get("description"),
+                        "status": entity_data.get("status", "pending"),
+                        "timestamp": entity_data.get("timestamp"),
+                        "related_entities": entity_data.get("related_entities", []),
+                        "related_relations": entity_data.get("related_relations", [])
+                    })
+                else:
+                    nodes[entity_id] = {
+                        "id": entity_id,
+                        "type": entity_type,
+                        "data": entity_data
+                    }
+            
+            # Convert relationships
+            for relationship in all_relationships:
+                if hasattr(relationship, 'type'):
+                    rel_data = {
+                        "id": relationship.id,
+                        "source": relationship.source_id,
+                        "target": relationship.target_id,
+                        "type": relationship.type,
+                        "data": relationship.properties if hasattr(relationship, 'properties') else {}
+                    }
+                else:
+                    rel_data = {
+                        "id": relationship.get("id"),
+                        "source": relationship.get("source_id"),
+                        "target": relationship.get("target_id"),
+                        "type": relationship.get("type", "relation"),
+                        "data": relationship.get("properties", {})
+                    }
+                edges.append(rel_data)
+            
+            legacy_banks[bank_name] = {
+                "nodes": nodes,
+                "edges": edges,
+                "observations": observations,
+                "reasoning_steps": reasoning_steps
+            }
+            
+        except Exception as e:
+            logger.warning(f"Failed to convert bank {bank_name} to legacy format: {e}")
+            legacy_banks[bank_name] = {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}
+    
+    return legacy_banks
+
+def serialize_legacy_data(legacy_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Serialize legacy data format for JSON storage"""
+    return legacy_data  # Already in serializable format
 
 # Load existing data on startup
 load_memory_banks()

@@ -192,8 +192,85 @@ Modify `main.py` to use the new core components for better KG construction.
 ### 📋 Next Priority
 - [x] **Phase 3.1**: Quality Assessment Framework - Entity completeness scoring, relationship accuracy metrics, graph connectivity analysis ✅ **COMPLETE** (100% test success)
 - [x] **Phase 3.2**: Performance Optimization - Graph database integration, indexing strategies, query optimization ✅ **COMPLETE** (100% test success)
-- [ ] Integration with existing FastAPI system
-- [ ] Migration strategy from old to new implementation
+- [ ] **Phase 4: MCP Integration** - Integration with existing FastAPI system, migration strategy from old to new implementation
+- [ ] Production deployment optimization
+
+### 🚧 **PHASE 4: MCP INTEGRATION - PLANNED**
+
+**Status**: 📋 **PLANNED** - Ready to implement MCP server integration
+**Priority**: 🔥 **HIGH** - Critical for production deployment
+
+**Integration Scope**:
+- ✅ **Core Components Ready**: All Phase 1-3.2 components implemented and validated
+- ✅ **Storage Backend Ready**: High-performance storage abstraction layer complete
+- 🔄 **MCP Integration Required**: Replace legacy storage system in main.py
+- 🔄 **API Migration Required**: Update FastAPI endpoints to use new storage backend
+
+#### **Phase 4.1: Storage Migration (Week 1)**
+**Goal**: Replace legacy memory_banks system with Phase 3.2 storage
+
+**Tasks**:
+- [ ] **4.1.1** Update main.py imports to use storage module
+- [ ] **4.1.2** Replace memory_banks dictionary with MemoryStore instances
+- [ ] **4.1.3** Update bank management API endpoints
+- [ ] **4.1.4** Migrate entity/relationship CRUD operations
+- [ ] **4.1.5** Update observation and reasoning step storage
+- [ ] **4.1.6** Implement data migration utilities
+
+**Files to Modify**:
+- `mcp_server/main.py` - Primary MCP server integration
+- `mcp_server/migration/` - New migration utilities module
+
+**Success Criteria**:
+- [ ] All existing MCP API endpoints functional
+- [ ] >90% test coverage for migration components
+- [ ] Performance improvement over legacy system
+- [ ] Backwards compatibility maintained
+
+#### **Phase 4.2: Knowledge Graph Integration (Week 1-2)**
+**Goal**: Integrate Phase 1-3 knowledge graph components
+
+**Tasks**:
+- [ ] **4.2.1** Integrate enhanced entity extraction pipeline
+- [ ] **4.2.2** Connect sophisticated relationship extraction
+- [ ] **4.2.3** Enable coreference resolution in processing
+- [ ] **4.2.4** Implement quality assessment endpoints
+- [ ] **4.2.5** Add graph analytics capabilities to API
+
+**New API Endpoints**:
+- `/api/v1/extract/entities` - Enhanced entity extraction
+- `/api/v1/extract/relationships` - Sophisticated relationship extraction
+- `/api/v1/resolve/coreferences` - Coreference resolution
+- `/api/v1/quality/assess` - Quality assessment
+- `/api/v1/analytics/graph` - Graph analytics
+
+**Success Criteria**:
+- [ ] All Phase 1-3 components accessible via API
+- [ ] End-to-end knowledge graph construction working
+- [ ] Quality metrics available for all operations
+- [ ] Performance benchmarks meet requirements
+
+#### **Phase 4.3: Testing & Validation (Week 2)**
+**Goal**: Comprehensive validation of integrated system
+
+**Tasks**:
+- [ ] **4.3.1** Create comprehensive integration test suite
+- [ ] **4.3.2** Performance benchmarking against legacy system
+- [ ] **4.3.3** Memory usage and optimization validation
+- [ ] **4.3.4** Load testing for production readiness
+- [ ] **4.3.5** Documentation update for new capabilities
+
+**Test Coverage Requirements**:
+- [ ] >95% integration test coverage
+- [ ] All API endpoints validated
+- [ ] Performance benchmarks documented
+- [ ] Memory usage profiling complete
+
+**Quality Gates**:
+- [ ] All existing functionality preserved
+- [ ] Performance improvement demonstrated
+- [ ] New capabilities fully functional
+- [ ] Production readiness confirmed
 
 ### ✅ **PHASE 3.2 Performance Optimization - COMPLETED** ✅
 
