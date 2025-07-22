@@ -5,6 +5,7 @@ This module provides utilities for migrating data from the legacy memory_banks
 dictionary format to the new Phase 3.2 storage abstraction layer.
 """
 
+import asyncio
 from typing import Dict, List, Any, Optional, Tuple
 import logging
 import uuid
@@ -32,10 +33,10 @@ class LegacyDataMigrator:
     def __init__(self, schema_manager: Optional[Any] = None):
         self.schema_manager = schema_manager
         
-    def migrate_memory_banks(self, legacy_banks: Dict[str, Any], 
-                           storage_backends: Dict[str, MemoryStore]) -> bool:
+    async def migrate_memory_banks(self, legacy_banks: Dict[str, Any], 
+                                 storage_backends: Dict[str, MemoryStore]) -> bool:
         """
-        Migrate legacy memory banks to new storage system
+        Migrate legacy memory banks to new storage system (async version)
         
         Args:
             legacy_banks: Dictionary with legacy bank data
@@ -52,21 +53,24 @@ class LegacyDataMigrator:
                     
                 storage = storage_backends[bank_name]
                 
+                # Connect to storage
+                await storage.connect()
+                
                 # Migrate entities (nodes)
                 if "nodes" in bank_data:
-                    self._migrate_nodes(bank_data["nodes"], storage)
+                    await self._migrate_nodes(bank_data["nodes"], storage)
                     
                 # Migrate relationships (edges)
                 if "edges" in bank_data:
-                    self._migrate_edges(bank_data["edges"], storage)
+                    await self._migrate_edges(bank_data["edges"], storage)
                     
                 # Migrate observations
                 if "observations" in bank_data:
-                    self._migrate_observations(bank_data["observations"], storage)
+                    await self._migrate_observations(bank_data["observations"], storage)
                     
                 # Migrate reasoning steps
                 if "reasoning_steps" in bank_data:
-                    self._migrate_reasoning_steps(bank_data["reasoning_steps"], storage)
+                    await self._migrate_reasoning_steps(bank_data["reasoning_steps"], storage)
                     
                 logger.info(f"Successfully migrated bank: {bank_name}")
                 
@@ -76,8 +80,8 @@ class LegacyDataMigrator:
             logger.error(f"Migration failed: {e}")
             return False
             
-    def _migrate_nodes(self, legacy_nodes: Dict[str, Any], storage: MemoryStore):
-        """Migrate legacy nodes to entities"""
+    async def _migrate_nodes(self, legacy_nodes: Dict[str, Any], storage: MemoryStore):
+        """Migrate legacy nodes to entities (async)"""
         for node_id, node_data in legacy_nodes.items():
             try:
                 # Convert legacy node to EntityInstance format
@@ -88,7 +92,7 @@ class LegacyDataMigrator:
                         properties=node_data.get("data", {}),
                         schema_manager=self.schema_manager
                     )
-                    storage.create_entity(entity)
+                    await storage.create_entity(entity)
                 else:
                     # Fallback format
                     entity_data = {
@@ -96,13 +100,13 @@ class LegacyDataMigrator:
                         "type": node_data.get("type", "node"),
                         "properties": node_data.get("data", {})
                     }
-                    storage.create_entity(entity_data)
+                    await storage.create_entity(entity_data)
                     
             except Exception as e:
                 logger.warning(f"Failed to migrate node {node_id}: {e}")
                 
-    def _migrate_edges(self, legacy_edges: List[Dict[str, Any]], storage: MemoryStore):
-        """Migrate legacy edges to relationships"""
+    async def _migrate_edges(self, legacy_edges: List[Dict[str, Any]], storage: MemoryStore):
+        """Migrate legacy edges to relationships (async)"""
         for edge_data in legacy_edges:
             try:
                 # Convert legacy edge to RelationshipInstance format
@@ -115,7 +119,7 @@ class LegacyDataMigrator:
                         properties=edge_data.get("data", {}),
                         schema_manager=self.schema_manager
                     )
-                    storage.create_relationship(relationship)
+                    await storage.create_relationship(relationship)
                 else:
                     # Fallback format
                     relationship_data = {
@@ -125,14 +129,14 @@ class LegacyDataMigrator:
                         "target_id": edge_data.get("target"),
                         "properties": edge_data.get("data", {})
                     }
-                    storage.create_relationship(relationship_data)
+                    await storage.create_relationship(relationship_data)
                     
             except Exception as e:
                 logger.warning(f"Failed to migrate edge: {e}")
                 
-    def _migrate_observations(self, legacy_observations: List[Dict[str, Any]], 
-                            storage: MemoryStore):
-        """Migrate legacy observations"""
+    async def _migrate_observations(self, legacy_observations: List[Dict[str, Any]], 
+                                  storage: MemoryStore):
+        """Migrate legacy observations (async)"""
         for obs_data in legacy_observations:
             try:
                 # Store observations as special entities
@@ -145,14 +149,14 @@ class LegacyDataMigrator:
                         "timestamp": obs_data.get("timestamp", datetime.now().isoformat())
                     }
                 }
-                storage.create_entity(obs_entity)
+                await storage.create_entity(obs_entity)
                 
             except Exception as e:
                 logger.warning(f"Failed to migrate observation: {e}")
                 
-    def _migrate_reasoning_steps(self, legacy_steps: List[Dict[str, Any]], 
-                               storage: MemoryStore):
-        """Migrate legacy reasoning steps"""
+    async def _migrate_reasoning_steps(self, legacy_steps: List[Dict[str, Any]], 
+                                     storage: MemoryStore):
+        """Migrate legacy reasoning steps (async)"""
         for step_data in legacy_steps:
             try:
                 # Store reasoning steps as special entities
@@ -167,16 +171,34 @@ class LegacyDataMigrator:
                         "related_relations": step_data.get("related_relations", [])
                     }
                 }
-                storage.create_entity(step_entity)
+                await storage.create_entity(step_entity)
                 
             except Exception as e:
                 logger.warning(f"Failed to migrate reasoning step: {e}")
 
-def migrate_legacy_data(legacy_banks: Dict[str, Any], 
-                       storage_backends: Dict[str, MemoryStore],
-                       schema_manager: Optional[Any] = None) -> bool:
+    async def get_all_entities_from_storage(self, storage: MemoryStore) -> List[Any]:
+        """Get all entities using query_entities method"""
+        try:
+            result = await storage.query_entities()
+            return result.entities if hasattr(result, 'entities') else []
+        except Exception as e:
+            logger.warning(f"Failed to get all entities: {e}")
+            return []
+            
+    async def get_all_relationships_from_storage(self, storage: MemoryStore) -> List[Any]:
+        """Get all relationships using query_relationships method"""
+        try:
+            result = await storage.query_relationships()
+            return result.relationships if hasattr(result, 'relationships') else []
+        except Exception as e:
+            logger.warning(f"Failed to get all relationships: {e}")
+            return []
+
+async def migrate_legacy_data(legacy_banks: Dict[str, Any], 
+                            storage_backends: Dict[str, MemoryStore],
+                            schema_manager: Optional[Any] = None) -> bool:
     """
-    Convenience function to migrate legacy data
+    Convenience function to migrate legacy data (async version)
     
     Args:
         legacy_banks: Legacy memory banks data
@@ -187,4 +209,32 @@ def migrate_legacy_data(legacy_banks: Dict[str, Any],
         bool: True if migration successful
     """
     migrator = LegacyDataMigrator(schema_manager)
-    return migrator.migrate_memory_banks(legacy_banks, storage_backends)
+    return await migrator.migrate_memory_banks(legacy_banks, storage_backends)
+
+def migrate_legacy_data_sync(legacy_banks: Dict[str, Any], 
+                           storage_backends: Dict[str, MemoryStore],
+                           schema_manager: Optional[Any] = None) -> bool:
+    """
+    Synchronous wrapper for legacy data migration
+    
+    Args:
+        legacy_banks: Legacy memory banks data
+        storage_backends: New storage backends
+        schema_manager: Optional schema manager for validation
+        
+    Returns:
+        bool: True if migration successful
+    """
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    try:
+        return loop.run_until_complete(
+            migrate_legacy_data(legacy_banks, storage_backends, schema_manager)
+        )
+    except Exception as e:
+        logger.error(f"Synchronous migration failed: {e}")
+        return False

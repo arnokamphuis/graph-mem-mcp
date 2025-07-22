@@ -2,6 +2,7 @@ from fastapi import FastAPI, Query, Body, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any
+from contextlib import asynccontextmanager
 import json
 import asyncio
 import time
@@ -59,7 +60,26 @@ except ImportError as e:
     ENHANCED_KG_AVAILABLE = False
     enhanced_kg_processor = None
 
-app = FastAPI()
+# Async context manager for application lifecycle
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    if STORAGE_AVAILABLE:
+        await load_memory_banks()
+        logger.info("Application startup complete with storage backends")
+    else:
+        load_memory_banks_sync()
+        logger.info("Application startup complete with legacy system")
+    yield
+    # Shutdown
+    if STORAGE_AVAILABLE and storage_backends:
+        for storage in storage_backends.values():
+            try:
+                await storage.disconnect()
+            except Exception as e:
+                logger.error(f"Error closing storage: {e}")
+
+app = FastAPI(lifespan=lifespan)
 
 # Data persistence configuration
 DATA_DIR = Path("/data")
@@ -275,8 +295,8 @@ def save_memory_banks():
         logger.error(f"Failed to save memory banks: {e}")
         # Continue execution even if save fails - data persists in memory
 
-def load_memory_banks():
-    """Load memory banks from persistent storage - supports both new and legacy systems"""
+async def load_memory_banks():
+    """Load memory banks from persistent storage - supports both new and legacy systems (async)"""
     global memory_banks, current_bank
     try:
         if MEMORY_FILE.exists():
@@ -284,9 +304,9 @@ def load_memory_banks():
                 data = json.load(f)
             
             if STORAGE_AVAILABLE and storage_backends is not None:
-                # New storage system - migrate legacy data
+                # New storage system - migrate legacy data using async migration
                 from migration.legacy_migrator import migrate_legacy_data
-                if migrate_legacy_data(data, storage_backends, schema_manager):
+                if await migrate_legacy_data(data, storage_backends, schema_manager):
                     logger.info("Successfully migrated legacy data to new storage system")
                 else:
                     logger.warning("Failed to migrate legacy data, using legacy system")
@@ -314,6 +334,17 @@ def load_memory_banks():
             memory_banks = {"default": {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}}
             current_bank = "default"
 
+def load_memory_banks_sync():
+    """Synchronous wrapper for loading memory banks"""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    return loop.run_until_complete(load_memory_banks())
+
 def convert_storage_to_legacy() -> Dict[str, Any]:
     """Convert new storage system data to legacy format for backup"""
     legacy_banks = {}
@@ -323,9 +354,27 @@ def convert_storage_to_legacy() -> Dict[str, Any]:
     
     for bank_name, storage in storage_backends.items():
         try:
-            # Get all entities and relationships
-            all_entities = storage.get_all_entities()
-            all_relationships = storage.get_all_relationships()
+            # Get all entities and relationships using proper async methods
+            # This is a synchronous wrapper - will be replaced with async version
+            import asyncio
+            
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # Use query methods instead of get_all methods
+            try:
+                entities_result = loop.run_until_complete(storage.query_entities())
+                relationships_result = loop.run_until_complete(storage.query_relationships())
+                
+                all_entities = entities_result.entities if hasattr(entities_result, 'entities') else []
+                all_relationships = relationships_result.relationships if hasattr(relationships_result, 'relationships') else []
+            except Exception as e:
+                logger.warning(f"Failed to query storage for bank {bank_name}: {e}")
+                all_entities = []
+                all_relationships = []
             
             nodes = {}
             edges = []
@@ -403,8 +452,7 @@ def serialize_legacy_data(legacy_data: Dict[str, Any]) -> Dict[str, Any]:
     """Serialize legacy data format for JSON storage"""
     return legacy_data  # Already in serializable format
 
-# Load existing data on startup
-load_memory_banks()
+# Note: Application initialization now handled by FastAPI lifespan manager
 
 
 # Bank management endpoints
