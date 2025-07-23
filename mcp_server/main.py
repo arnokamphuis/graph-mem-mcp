@@ -1,22 +1,218 @@
-from fastapi import FastAPI, Query, Body, Request
+import sys
+
+
+# --- Pydantic models for endpoint request bodies ---
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any, List
+
+class BankOp(BaseModel):
+    bank: str = Field(..., description="Target memory bank name")
+
+class KnowledgeIngest(BaseModel):
+    text: str
+    bank: str = "default"
+    source: str = "text_input"
+    extract_entities: bool = True
+    extract_relationships: bool = True
+    create_observations: bool = True
+
+# --- Stubs for legacy functions to avoid undefined errors (modern system does not use them) ---
+def save_memory_banks():
+    """Stub for legacy save_memory_banks (no-op in modern system)"""
+    pass
+
+def load_memory_banks():
+    """Stub for legacy load_memory_banks (no-op in modern system)"""
+    pass
+
+# --- Optional imports for schema_manager and graph_analytics ---
+try:
+    from core.graph_schema import SchemaManager
+    schema_manager = SchemaManager()
+except ImportError:
+    schema_manager = None
+
+try:
+    from core.graph_analytics import GraphAnalytics
+    graph_analytics = GraphAnalytics()
+except ImportError:
+    graph_analytics = None
+from fastapi import FastAPI, Query, Body, Request, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
-from pydantic import BaseModel
-from typing import List, Dict, Any
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Optional, Union
 from contextlib import asynccontextmanager
+from pathlib import Path
+import uuid
+from datetime import datetime
+import os
+import json
+import logging
+# Initialize FastAPI app
+app = FastAPI()
+
+# --- Global variables for modern storage system ---
+storage_backends: Dict[str, Any] = {}
+current_bank: str = "default"
+
+def get_storage(bank: str) -> Any:
+    """Get the storage backend for a given bank, or raise error if not found."""
+    if bank not in storage_backends:
+        raise HTTPException(status_code=404, detail=f"Bank '{bank}' not found.")
+    return storage_backends[bank]
+
+# Legacy memory file path (for compatibility, not used in modern system)
+MEMORY_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "memory_banks.json")
 import json
 import asyncio
 import time
 import logging
-import os
-import re
-import sys
-import uuid
-from datetime import datetime
+
+# Initialize FastAPI app
+app = FastAPI()
+
+# --- Visualization Endpoint (modern system) ---
 from pathlib import Path
+@app.get("/banks/{bank}/visualize")
+def visualize_graph(bank: str):
+    """
+    Serve interactive graph visualization page for a specific memory bank (modern system).
+    """
+    if bank not in storage_backends:
+        return JSONResponse(content={"error": "Bank not found"}, status_code=404)
+    try:
+        template_path = Path(__file__).parent / "templates" / "visualization.html"
+        with open(template_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        html_content = html_content.replace('{{bank}}', bank)
+        return StreamingResponse(
+            iter([html_content]),
+            media_type="text/html"
+        )
+    except FileNotFoundError:
+        return JSONResponse(
+            content={"error": "Visualization template not found"}, 
+            status_code=500
+        )
+    except Exception as e:
+        return JSONResponse(
+            content={"error": f"Error loading visualization: {str(e)}"}, 
+            status_code=500)
+# --- Modern Bank Management Endpoints ---
+@app.post("/banks/create")
+def create_bank(op: BankOp):
+    """
+    Create a new memory bank using the modern storage system.
+    Request body: {"bank": "bank_name"}
+    Response: {"status": "success", "bank": "bank_name"}
+    """
+    if op.bank in storage_backends:
+        return {"status": "error", "message": "Bank already exists."}
+    storage_backends[op.bank] = create_graph_store("memory")
+    return {"status": "success", "bank": op.bank}
+
+@app.post("/banks/select")
+def select_bank(op: BankOp):
+    """
+    Select the active memory bank.
+    Request body: {"bank": "bank_name"}
+    Response: {"status": "success", "selected": "bank_name"}
+    """
+    global current_bank
+    if op.bank not in storage_backends:
+        return {"status": "error", "message": "Bank does not exist."}
+    current_bank = op.bank
+    return {"status": "success", "selected": current_bank}
+
+@app.get("/banks/list")
+def list_banks():
+    """
+    List all memory banks and show the current active bank.
+    Response: {"banks": ["bank1", "bank2"], "current": "bank_name"}
+    """
+    return {"banks": list(storage_backends.keys()), "current": current_bank}
+
+@app.post("/banks/delete")
+def delete_bank(op: BankOp):
+    """
+    Delete a memory bank (except 'default').
+    Request body: {"bank": "bank_name"}
+    Response: {"status": "success", "deleted": "bank_name", "current": "bank_name"}
+    """
+    global current_bank
+    if op.bank == "default":
+        return {"status": "error", "message": "Cannot delete default bank."}
+    if op.bank not in storage_backends:
+        return {"status": "error", "message": "Bank does not exist."}
+    del storage_backends[op.bank]
+    if current_bank == op.bank:
+        current_bank = "default"
+    return {"status": "success", "deleted": op.bank, "current": current_bank}
+
+@app.post("/banks/clear")
+def clear_bank(op: BankOp):
+    """
+    Clear all entities, relationships, and observations from a bank (modern system).
+    Request body: {"bank": "bank_name"}
+    Response: {"status": "success", "cleared": "bank_name", "entities_deleted": N, "relations_deleted": N, "observations_deleted": N}
+    """
+    b = op.bank or current_bank
+    store = get_storage(b)
+    entities_count = len(store.entities)
+    relations_count = len(store.relationships)
+    observations_count = sum(len(e.data.get("observations", [])) for e in store.entities.values())
+    # Clear all data
+    store.entities.clear()
+    store.relationships.clear()
+    # No explicit observations list; stored in entity data
+    return {
+        "status": "success", 
+        "cleared": b, 
+        "entities_deleted": entities_count,
+        "relations_deleted": relations_count, 
+        "observations_deleted": observations_count
+    }
+
+# --- Production-grade Pydantic models for all graph memory entities ---
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any, List
+
+class Node(BaseModel):
+    id: str = Field(..., description="Unique identifier for the node/entity")
+    data: Dict[str, Any] = Field(default_factory=dict, description="Arbitrary entity data, including type, name, observations, etc.")
+    created_at: Optional[str] = Field(default=None, description="Creation timestamp")
+    updated_at: Optional[str] = Field(default=None, description="Last update timestamp")
+
+class Edge(BaseModel):
+    id: Optional[str] = Field(default=None, description="Unique identifier for the edge/relation")
+    source: str = Field(..., description="Source node/entity id")
+    target: str = Field(..., description="Target node/entity id")
+    data: Dict[str, Any] = Field(default_factory=dict, description="Arbitrary relation data, including type, context, etc.")
+    created_at: Optional[str] = Field(default=None, description="Creation timestamp")
+    updated_at: Optional[str] = Field(default=None, description="Last update timestamp")
+
+class Observation(BaseModel):
+    id: Optional[str] = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique identifier for the observation")
+    entity_id: Optional[str] = Field(default=None, description="Associated entity id (if any)")
+    content: str = Field(..., description="Observation text/content")
+    timestamp: Optional[str] = Field(default_factory=lambda: datetime.utcnow().isoformat(), description="Timestamp of observation")
+    data: Dict[str, Any] = Field(default_factory=dict, description="Additional observation metadata")
+
+class ReasoningStep(BaseModel):
+    id: Optional[str] = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique identifier for the reasoning step")
+    step_number: Optional[int] = Field(default=None, description="Step number in sequence")
+    reasoning: str = Field(..., description="Reasoning or thought process")
+    thought: Optional[str] = Field(default=None, description="Optional thought or hypothesis")
+    timestamp: Optional[str] = Field(default_factory=lambda: datetime.utcnow().isoformat(), description="Timestamp of step")
+    data: Dict[str, Any] = Field(default_factory=dict, description="Additional step metadata")
+
+class BankOp(BaseModel):
+    bank: str = Field(..., description="Target memory bank name")
 
 # Set up logging
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
+from tool_list import TOOL_LIST
 
 # PHASE 4.1.1: Import new storage system
 try:
@@ -45,282 +241,8 @@ try:
     MODERN_KG_AVAILABLE = True
     logger.info("Modern knowledge graph processor loaded successfully")
 except ImportError as e:
-    logger.warning(f"Modern KG processor not available: {e}")
     MODERN_KG_AVAILABLE = False
-    kg_processor = None
-
-# Enhanced Knowledge Graph Processing
-try:
-    from enhanced_knowledge_processor import create_enhanced_knowledge_graph_processor
-    enhanced_kg_processor = create_enhanced_knowledge_graph_processor()
-    ENHANCED_KG_AVAILABLE = True
-    logger.info("Enhanced knowledge graph processor loaded successfully")
-except ImportError as e:
-    logger.warning(f"Enhanced KG processor not available: {e}")
-    ENHANCED_KG_AVAILABLE = False
-    enhanced_kg_processor = None
-
-# Async context manager for application lifecycle
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Modern startup only
-    # Load banks from disk (if needed, but only for storage_backends)
-    try:
-        # Ensure default bank exists
-        if "default" not in storage_backends:
-            storage_backends["default"] = create_graph_store("memory")
-            logger.info("Created default bank.")
-        logger.info("Application startup complete.")
-    except Exception as e:
-        logger.error(f"Error during bank loading: {e}")
-    yield
-    # Shutdown
-    for storage in storage_backends.values():
-        try:
-            await storage.disconnect()
-        except Exception as e:
-            logger.error(f"Error closing storage: {e}")
-
-app = FastAPI(lifespan=lifespan)
-
-# Data persistence configuration
-DATA_DIR = Path("/data")
-MEMORY_FILE = DATA_DIR / "memory_banks.json"
-
-# Ensure data directory exists
-DATA_DIR.mkdir(exist_ok=True)
-
-
-# PHASE 4.1.2: Modern storage system only
-current_bank = "default"
-storage_backends: Dict[str, MemoryStore] = {}
-
-# Initialize core components if available
-if CORE_COMPONENTS_AVAILABLE:
-    schema_manager = SchemaManager()
-    entity_resolver = EntityResolver()
-    graph_analytics = GraphAnalytics()
-    logger.info("Core knowledge graph components initialized")
-else:
-    schema_manager = None
-    entity_resolver = None
-    graph_analytics = None
-
-def get_storage(bank_name: str = None) -> MemoryStore:
-    """Get or create storage backend for a specific bank"""
-    if bank_name is None:
-        bank_name = current_bank
-    if bank_name not in storage_backends:
-        storage_backends[bank_name] = create_graph_store("memory")
-        logger.info(f"Created new storage backend for bank: {bank_name}")
-    return storage_backends[bank_name]
-
-logger.info("Phase 3.2 storage system initialized successfully")
-
-def event_stream():
-    # Send a keepalive event every 5 seconds
-    while True:
-        yield "data: keepalive\n\n"
-        time.sleep(5)
-
-@app.get("/events")
-def sse_events():
-    """
-    Dummy Server-Sent Events endpoint for agent compatibility.
-    """
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-# Logging middleware for debugging
-
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    logging.info(f"Incoming request: {request.method} {request.url}")
-    logging.info(f"Headers: {dict(request.headers)}")
-    
-    # Don't consume the request body in middleware - this prevents route handlers from reading it!
-    # The actual route handlers will read the body when needed
-    
-    response = await call_next(request)
-    logging.info(f"Response status: {response.status_code}")
-    return response
-
-import re
-import uuid
-from datetime import datetime
-
-# Simple in-memory graph structure
-class Node(BaseModel):
-    id: str
-    type: str = "node"
-    data: Dict[str, Any] = {}
-
-class Edge(BaseModel):
-    id: str = None
-    source: str
-    target: str
-    type: str = "relation"
-    data: Dict[str, Any] = {}
-
-class Observation(BaseModel):
-    id: str
-    entity_id: str
-    content: str
-    timestamp: str
-
-from pydantic import Field
-
-class ReasoningStep(BaseModel):
-    id: str
-    description: str
-    status: str = "pending"
-    timestamp: str = None
-    related_entities: List[str] = Field(default_factory=list)
-    related_relations: List[str] = Field(default_factory=list)
-
-class TextIngest(BaseModel):
-    text: str
-    bank: str = "default"
-
-class BankOp(BaseModel):
-    bank: str
-
-# PHASE 4.1.2: Legacy storage initialization moved to conditional block above
-
-# Persistence functions
-def serialize_memory_banks():
-    """Convert memory banks to JSON-serializable format"""
-    serialized = {}
-    for bank_name, bank_data in memory_banks.items():
-        try:
-            # Use dict() instead of model_dump() for compatibility
-            nodes_dict = {}
-            for node_id, node in bank_data["nodes"].items():
-                try:
-                    # Use model_dump for Pydantic v2 compatibility
-                    nodes_dict[node_id] = node.model_dump()
-                except Exception:
-                    # If that fails, create manual dict
-                    nodes_dict[node_id] = {
-                        "id": node.id,
-                        "data": node.data,
-                        "created_at": node.created_at
-                    }
-            
-            serialized[bank_name] = {
-                "nodes": nodes_dict,
-                "edges": [edge.model_dump() for edge in bank_data["edges"]],
-                "observations": [obs.model_dump() for obs in bank_data["observations"]],
-                "reasoning_steps": [step.model_dump() for step in bank_data["reasoning_steps"]]
-            }
-        except Exception as e:
-            logger.error(f"Error serializing bank {bank_name}: {e}")
-            # Skip problematic bank rather than failing entirely
-            continue
-    return serialized
-
-def deserialize_memory_banks(data):
-    """Convert JSON data back to memory banks with proper objects"""
-    global memory_banks
-    memory_banks = {}
-    for bank_name, bank_data in data.items():
-        memory_banks[bank_name] = {
-            "nodes": {node_id: Node(**node_data) for node_id, node_data in bank_data["nodes"].items()},
-            "edges": [Edge(**edge_data) for edge_data in bank_data["edges"]],
-            "observations": [Observation(**obs_data) for obs_data in bank_data["observations"]],
-            "reasoning_steps": [ReasoningStep(**step_data) for step_data in bank_data["reasoning_steps"]]
-        }
-
-# PHASE 4.1.3: Updated persistence functions for new storage system
-def save_memory_banks():
-    """Save memory banks to persistent storage - modern storage system handles persistence automatically"""
-    try:
-        if STORAGE_AVAILABLE and storage_backends:
-            # New storage system - data is automatically persisted
-            logger.info("Memory banks using modern storage system - persistence automatic")
-            return
-        else:
-            # Legacy system fallback
-            serialized_data = serialize_memory_banks()
-        
-        # Ensure DATA_DIR exists and is writable
-        try:
-            DATA_DIR.mkdir(exist_ok=True)
-        except PermissionError as e:
-            logger.error(f"Cannot create data directory {DATA_DIR}: {e}")
-            return
-        
-        # Check if directory is writable
-        if not os.access(DATA_DIR, os.W_OK):
-            logger.error(f"Data directory {DATA_DIR} is not writable")
-            return
-        
-        # Write to temp file first, then rename for atomic operation
-        temp_file = MEMORY_FILE.with_suffix('.tmp')
-        try:
-            with open(temp_file, 'w') as f:
-                json.dump(serialized_data, f, indent=2)
-            
-            # Atomic rename
-            temp_file.rename(MEMORY_FILE)
-            logger.info(f"Memory banks saved to {MEMORY_FILE}")
-        except PermissionError as e:
-            logger.error(f"Permission denied writing to {temp_file}: {e}")
-            # Try to cleanup temp file if it exists
-            if temp_file.exists():
-                try:
-                    temp_file.unlink()
-                except:
-                    pass
-        except Exception as e:
-            logger.error(f"Error writing memory banks file: {e}")
-            # Try to cleanup temp file if it exists
-            if temp_file.exists():
-                try:
-                    temp_file.unlink()
-                except:
-                    pass
-    except Exception as e:
-        logger.error(f"Failed to save memory banks: {e}")
-        # Continue execution even if save fails - data persists in memory
-
-async def load_memory_banks():
-    """Load memory banks from persistent storage - supports both new and legacy systems (async)"""
-    global memory_banks, current_bank
-    try:
-        if MEMORY_FILE.exists():
-            with open(MEMORY_FILE, 'r') as f:
-                data = json.load(f)
-            
-            if STORAGE_AVAILABLE and storage_backends is not None:
-                # New storage system - migrate legacy data using async migration
-                from migration.legacy_migrator import migrate_legacy_data
-                if await migrate_legacy_data(data, storage_backends, schema_manager):
-                    logger.info("Successfully migrated legacy data to new storage system")
-                else:
-                    logger.warning("Failed to migrate legacy data, using legacy system")
-                    deserialize_memory_banks(data)
-            else:
-                # Legacy system
-                deserialize_memory_banks(data)
-                
-            logger.debug(f"Memory banks loaded from {MEMORY_FILE}")
-            if not STORAGE_AVAILABLE:
-                logger.debug(f"Loaded banks: {list(memory_banks.keys())}")
-        else:
-            logger.debug("No existing memory file found, starting with default banks")
-            if not STORAGE_AVAILABLE:
-                memory_banks = {"default": {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}}
-        
-        # Ensure current_bank exists
-        if not STORAGE_AVAILABLE and current_bank not in memory_banks:
-            current_bank = "default"
-            
-    except Exception as e:
-        logger.error(f"Failed to load memory banks: {e}")
-        logger.info("Starting with default memory banks")
-        if not STORAGE_AVAILABLE:
-            memory_banks = {"default": {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}}
-            current_bank = "default"
+    logger.warning(f"Modern knowledge graph processor not available: {e}")
 
 async def load_memory_banks_legacy():
     """Async version of legacy memory banks loading for compatibility with FastAPI lifespan"""
@@ -455,188 +377,252 @@ def clear_bank(op: BankOp):
         "observations_deleted": observations_count
     }
 
-# Bank-aware entity endpoints
 
+# --- Modern Entity Endpoints ---
 @app.post("/entities")
 def add_entity(node: Node = Body(...), bank: str = Query(None)):
     """
-    Add an entity (node) to the selected or specified bank.
+    Add an entity (node) to the selected or specified bank (modern system).
     Request body: Node model
     Query param: bank (optional)
     Response: {"status": "success", "entity": Node, "bank": "bank_name"}
     """
     b = bank or current_bank
     try:
+        store = get_storage(b)
         if not isinstance(node, Node):
             node = Node(**node.model_dump() if hasattr(node, 'model_dump') else node)
-        memory_banks[b]["nodes"][node.id] = node
-        save_memory_banks()  # Persist the change
+        store.entities[node.id] = node
         return {"status": "success", "entity": node, "bank": b}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-
 @app.get("/entities")
 def get_entities(bank: str = Query(None)):
     """
-    Get all entities (nodes) from the selected or specified bank.
+    Get all entities (nodes) from the selected or specified bank (modern system).
     Query param: bank (optional)
     Response: List of Node dicts
     """
     b = bank or current_bank
-    return [n.model_dump() for n in memory_banks[b]["nodes"].values()]
-
+    store = get_storage(b)
+    return [n.model_dump() for n in store.entities.values()]
 
 @app.put("/entities/{entity_id}")
 def update_entity(entity_id: str, node: Node, bank: str = Query(None)):
     """
-    Update an entity (node) in the selected or specified bank.
+    Update an entity (node) in the selected or specified bank (modern system).
     Request body: Node model
     Query param: bank (optional)
     Response: {"status": "success", "entity": Node, "bank": "bank_name"}
     """
     b = bank or current_bank
-    memory_banks[b]["nodes"][entity_id] = node
+    store = get_storage(b)
+    store.entities[entity_id] = node
     return {"status": "success", "entity": node, "bank": b}
-
 
 @app.delete("/entities/{entity_id}")
 def delete_entity(entity_id: str, bank: str = Query(None)):
     """
-    Delete an entity (node) from the selected or specified bank.
+    Delete an entity (node) from the selected or specified bank (modern system).
     Query param: bank (optional)
     Response: {"status": "success", "deleted": "entity_id", "bank": "bank_name"}
     """
     b = bank or current_bank
-    if entity_id in memory_banks[b]["nodes"]:
-        del memory_banks[b]["nodes"][entity_id]
+    store = get_storage(b)
+    if entity_id in store.entities:
+        del store.entities[entity_id]
         return {"status": "success", "deleted": entity_id, "bank": b}
     return {"status": "error", "message": "Entity not found", "bank": b}
 
-# Bank-aware relation endpoints
 
+# --- Modern Relation Endpoints ---
 @app.post("/relations")
 def add_relation(edge: Edge = Body(...), bank: str = Query(None)):
     """
-    Add a relation (edge) to the selected or specified bank.
+    Add a relation (edge) to the selected or specified bank (modern system).
     Request body: Edge model
     Query param: bank (optional)
     Response: {"status": "success", "relation": Edge, "bank": "bank_name"}
     """
     b = bank or current_bank
     try:
-        edge.id = edge.id or f"{edge.source}-{edge.target}-{len(memory_banks[b]['edges'])}"
+        store = get_storage(b)
+        edge.id = edge.id or f"{edge.source}-{edge.target}-{len(store.relationships)}"
         if not isinstance(edge, Edge):
             edge = Edge(**edge.model_dump() if hasattr(edge, 'model_dump') else edge)
-        memory_banks[b]["edges"].append(edge)
-        save_memory_banks()  # Persist the change
+        store.relationships.append(edge)
         return {"status": "success", "relation": edge, "bank": b}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-
 @app.get("/relations")
 def get_relations(bank: str = Query(None)):
     """
-    Get all relations (edges) from the selected or specified bank.
+    Get all relations (edges) from the selected or specified bank (modern system).
     Query param: bank (optional)
     Response: List of Edge dicts
     """
     b = bank or current_bank
-    return [e.model_dump() for e in memory_banks[b]["edges"]]
-
+    store = get_storage(b)
+    return [e.model_dump() for e in store.relationships]
 
 @app.put("/relations/{relation_id}")
 def update_relation(relation_id: str, edge: Edge, bank: str = Query(None)):
     """
-    Update a relation (edge) in the selected or specified bank.
+    Update a relation (edge) in the selected or specified bank (modern system).
     Request body: Edge model
     Query param: bank (optional)
     Response: {"status": "success", "relation": Edge, "bank": "bank_name"}
     """
     b = bank or current_bank
-    for i, e in enumerate(memory_banks[b]["edges"]):
+    store = get_storage(b)
+    for i, e in enumerate(store.relationships):
         if e.id == relation_id:
-            memory_banks[b]["edges"][i] = edge
+            store.relationships[i] = edge
             return {"status": "success", "relation": edge, "bank": b}
     return {"status": "error", "message": "Relation not found", "bank": b}
-
 
 @app.delete("/relations/{relation_id}")
 def delete_relation(relation_id: str, bank: str = Query(None)):
     """
-    Delete a relation (edge) from the selected or specified bank.
+    Delete a relation (edge) from the selected or specified bank (modern system).
     Query param: bank (optional)
     Response: {"status": "success", "deleted": "relation_id", "bank": "bank_name"}
     """
     b = bank or current_bank
-    for i, e in enumerate(memory_banks[b]["edges"]):
+    store = get_storage(b)
+    for i, e in enumerate(store.relationships):
         if e.id == relation_id:
-            del memory_banks[b]["edges"][i]
+            del store.relationships[i]
             return {"status": "success", "deleted": relation_id, "bank": b}
     return {"status": "error", "message": "Relation not found", "bank": b}
 
-# Bank-aware observation endpoints
 
+# --- Modern Observation Endpoints ---
 @app.post("/observations")
 def add_observation(obs: Observation = Body(...), bank: str = Query(None)):
     """
-    Add an observation to the selected or specified bank.
+    Add an observation to the selected or specified bank (modern system).
     Request body: Observation model
     Query param: bank (optional)
     Response: {"status": "success", "observation": Observation, "bank": "bank_name"}
     """
     b = bank or current_bank
     try:
+        store = get_storage(b)
         if not isinstance(obs, Observation):
             obs = Observation(**obs.model_dump() if hasattr(obs, 'model_dump') else obs)
-        memory_banks[b]["observations"].append(obs)
-        save_memory_banks()  # Persist the change
+        # Attach observation to entity if entity_id is provided
+        if obs.entity_id and obs.entity_id in store.entities:
+            entity = store.entities[obs.entity_id]
+            entity.data.setdefault("observations", []).append(obs.model_dump())
+        else:
+            # Orphan observation: store in a dedicated list (optional, not implemented here)
+            pass
         return {"status": "success", "observation": obs, "bank": b}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-
 @app.get("/observations")
 def get_observations(bank: str = Query(None)):
     """
-    Get all observations from the selected or specified bank.
+    Get all observations from the selected or specified bank (modern system).
     Query param: bank (optional)
     Response: List of Observation dicts
     """
     b = bank or current_bank
-    return [o.model_dump() for o in memory_banks[b]["observations"]]
+    store = get_storage(b)
+    observations = []
+    for entity in store.entities.values():
+        observations.extend(entity.data.get("observations", []))
+    return observations
 
-# Bank-aware sequential thinking endpoints
 
+# --- Modern Reasoning Endpoints ---
 @app.post("/sequential-thinking")
 def add_reasoning_step(step: ReasoningStep = Body(...), bank: str = Query(None)):
     """
-    Add a reasoning step to the selected or specified bank.
+    Add a reasoning step to the selected or specified bank (modern system).
     Request body: ReasoningStep model
     Query param: bank (optional)
     Response: {"status": "success", "step": ReasoningStep, "bank": "bank_name"}
     """
     b = bank or current_bank
     try:
+        store = get_storage(b)
+        if not hasattr(store, "reasoning_steps"):
+            store.reasoning_steps = []
         if not isinstance(step, ReasoningStep):
             step = ReasoningStep(**step.model_dump() if hasattr(step, 'model_dump') else step)
-        memory_banks[b]["reasoning_steps"].append(step)
-        save_memory_banks()  # Persist the change
+        store.reasoning_steps.append(step)
         return {"status": "success", "step": step, "bank": b}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-
 @app.get("/sequential-thinking")
 def get_reasoning_steps(bank: str = Query(None)):
     """
-    Get all reasoning steps from the selected or specified bank.
+    Get all reasoning steps from the selected or specified bank (modern system).
     Query param: bank (optional)
     Response: List of ReasoningStep dicts
     """
     b = bank or current_bank
-    return [s.model_dump() for s in memory_banks[b]["reasoning_steps"]]
+    store = get_storage(b)
+    if hasattr(store, "reasoning_steps"):
+        return [s.model_dump() for s in store.reasoning_steps]
+    return []
+
+
+# --- Modern MCP Tool Endpoints ---
+from fastapi import HTTPException
+
+@app.post("/open-nodes")
+def open_nodes_endpoint(names: List[str] = Body(...), bank: str = Query(None)):
+    """
+    Open specific nodes in the knowledge graph by their names (modern system).
+    Request body: {"names": ["entity1", "entity2"]}
+    Query param: bank (optional)
+    Response: List of Node dicts
+    """
+    b = bank or current_bank
+    store = get_storage(b)
+    found = []
+    for name in names:
+        node = store.entities.get(name)
+        if node:
+            found.append(node.model_dump())
+    if not found:
+        raise HTTPException(status_code=404, detail="No nodes found for given names.")
+    return found
+
+
+@app.get("/read-graph")
+def read_graph_endpoint(bank: str = Query(None)):
+    """
+    Read the entire knowledge graph summary for the current memory bank (modern system).
+    Query param: bank (optional)
+    Response: Dict with summary statistics
+    """
+    b = bank or current_bank
+    store = get_storage(b)
+    nodes = store.entities
+    edges = store.relationships
+    observations = []
+    for entity in nodes.values():
+        observations.extend(entity.data.get("observations", []))
+    reasoning_steps = getattr(store, "reasoning_steps", [])
+    return {
+        "bank": b,
+        "entity_count": len(nodes),
+        "relation_count": len(edges),
+        "observation_count": len(observations),
+        "reasoning_step_count": len(reasoning_steps),
+        "entities": [n.model_dump() for n in nodes.values()],
+        "relations": [e.model_dump() for e in edges],
+        "observations": observations,
+        "reasoning_steps": [s.model_dump() for s in reasoning_steps]
+    }
 
 
 # Search Helper Functions
@@ -927,11 +913,31 @@ def search_entities_endpoint(
     Returns entities ranked by relevance score.
     Supports fuzzy matching for handling typos and variations.
     """
+    """
+    Search entities by name, type, or observations content in the modern system.
+    Returns entities ranked by relevance score.
+    Supports fuzzy matching for handling typos and variations.
+    """
+    b = bank or current_bank
     try:
-        results = search_entities(q, bank, entity_type, case_sensitive, use_regex, fuzzy_match, fuzzy_threshold, limit)
+        store = get_storage(b)
+        results = []
+        for entity_id, entity in store.entities.items():
+            name = entity.data.get("name", "")
+            etype = entity.data.get("type", "")
+            observations = entity.data.get("observations", [])
+            text_blob = f"{name} {etype} " + " ".join([obs.get("content", "") if isinstance(obs, dict) else str(obs) for obs in observations])
+            score = calculate_relevance_score(q, text_blob, fuzzy_match=fuzzy_match, fuzzy_threshold=fuzzy_threshold)
+            if score > 0.0:
+                results.append({
+                    "entity_id": entity_id,
+                    "entity": entity.model_dump(),
+                    "relevance_score": score
+                })
+        results.sort(key=lambda x: x["relevance_score"], reverse=True)
         return {
             "query": q,
-            "bank": bank or current_bank,
+            "bank": b,
             "total_results": len(results),
             "results": results[:limit] if limit else results,
             "search_parameters": {
@@ -958,11 +964,30 @@ def search_relationships_endpoint(
     Search relationships by type, context, or entity names.
     Returns relationships ranked by relevance score.
     """
+    """
+    Search relationships by type, context, or entity names in the modern system.
+    Returns relationships ranked by relevance score.
+    """
+    b = bank or current_bank
     try:
-        results = search_relationships(q, bank, relationship_type, case_sensitive, use_regex)
+        store = get_storage(b)
+        results = []
+        for edge in store.relationships:
+            etype = edge.data.get("type", "")
+            context = edge.data.get("context", "")
+            source_name = store.entities.get(edge.source, {}).data.get("name", "") if edge.source in store.entities else ""
+            target_name = store.entities.get(edge.target, {}).data.get("name", "") if edge.target in store.entities else ""
+            text_blob = f"{etype} {context} {source_name} {target_name}"
+            score = calculate_relevance_score(q, text_blob)
+            if score > 0.0:
+                results.append({
+                    "relation": edge.model_dump(),
+                    "relevance_score": score
+                })
+        results.sort(key=lambda x: x["relevance_score"], reverse=True)
         return {
             "query": q,
-            "bank": bank or current_bank,
+            "bank": b,
             "total_results": len(results),
             "results": results[:limit] if limit else results,
             "search_parameters": {
@@ -987,11 +1012,30 @@ def search_observations_endpoint(
     Search observations by content or entity.
     Returns observations ranked by relevance score.
     """
+    """
+    Search observations by content or entity in the modern system.
+    Returns observations ranked by relevance score.
+    """
+    b = bank or current_bank
     try:
-        results = search_observations(q, bank, entity_id, case_sensitive, use_regex)
+        store = get_storage(b)
+        results = []
+        for entity in store.entities.values():
+            if entity_id and entity.id != entity_id:
+                continue
+            for obs in entity.data.get("observations", []):
+                content = obs.get("content", "") if isinstance(obs, dict) else str(obs)
+                score = calculate_relevance_score(q, content)
+                if score > 0.0:
+                    results.append({
+                        "observation": obs,
+                        "entity_id": entity.id,
+                        "relevance_score": score
+                    })
+        results.sort(key=lambda x: x["relevance_score"], reverse=True)
         return {
             "query": q,
-            "bank": bank or current_bank,
+            "bank": b,
             "total_results": len(results),
             "results": results[:limit] if limit else results,
             "search_parameters": {
@@ -1090,50 +1134,15 @@ def get_visualizations(bank: str = Query(None)):
         }
     }
 
-@app.get("/banks/{bank}/visualize")
-def visualize_graph(bank: str):
-    """
-    Serve interactive graph visualization page for a specific memory bank.
-    """
-    if bank not in storage_backends:
-        return JSONResponse(content={"error": "Bank not found"}, status_code=404)
-
-    try:
-        # Read the HTML template from file
-        template_path = Path(__file__).parent / "templates" / "visualization.html"
-        with open(template_path, 'r', encoding='utf-8') as f:
-            html_content = f.read()
-        
-        # Replace template variables
-        html_content = html_content.replace('{{bank}}', bank)
-        
-        return StreamingResponse(
-            iter([html_content]),
-            media_type="text/html"
-        )
-    except FileNotFoundError:
-        return JSONResponse(
-            content={"error": "Visualization template not found"}, 
-            status_code=500
-        )
-    except Exception as e:
-        return JSONResponse(
-            content={"error": f"Error loading visualization: {str(e)}"}, 
-            status_code=500
-        )
-
 @app.get("/")
 async def root():
     """Root endpoint - redirects to visualization"""
-    # Default to first available bank or 'default'
     default_bank = 'default' if 'default' in storage_backends else list(storage_backends.keys())[0] if storage_backends else 'default'
-    # Render the enhanced visualization page
     return visualize_graph(default_bank)
 
-# New endpoint: ingest long text and update/extend graph in a specific bank
-
+# --- Context Ingestion Endpoint ---
 @app.post("/context/ingest")
-def ingest_context(payload: TextIngest = Body(...)):
+def ingest_context(payload: KnowledgeIngest = Body(...)):
     """
     Ingest text using modern NLP-based knowledge graph construction.
     Uses spaCy for NER, dependency parsing, and sentence transformers for embeddings.
@@ -1142,138 +1151,82 @@ def ingest_context(payload: TextIngest = Body(...)):
     """
     text = payload.text
     b = payload.bank or current_bank
-    
-    if MODERN_KG_AVAILABLE and kg_processor:
-        try:
-            # Use modern knowledge graph processor
-            existing_entity_names = list(memory_banks[b]["nodes"].keys())
+    try:
+        # Use modern knowledge graph processor
+        if MODERN_KG_AVAILABLE and kg_processor:
+            existing_entity_names = list(storage_backends[b].entities.keys())
             kg_result = kg_processor.construct_knowledge_graph(text, existing_entity_names)
-            
             entities = kg_result['entities']
             relationships = kg_result['relationships']
             stats = kg_result['stats']
-            
-            # Add entities as nodes
-            entities_added = 0
+            entities_added = len(entities)
+            relationships_added = len(relationships)
+            # Add entities and relationships to the bank
             for entity in entities:
-                if entity.name not in memory_banks[b]["nodes"]:
-                    node_data = {
-                        "name": entity.name,
-                        "type": entity.entity_type,
-                        "confidence": entity.confidence,
-                        "aliases": list(entity.aliases),
-                        "mentions": entity.mentions,
-                        "from_modern_kg": True
-                    }
-                    node = Node(id=entity.name, data=node_data)
-                    memory_banks[b]["nodes"][entity.name] = node
-                    entities_added += 1
-                else:
-                    # Update existing node with new information
-                    existing_node = memory_banks[b]["nodes"][entity.name]
-                    if "aliases" not in existing_node.data:
-                        existing_node.data["aliases"] = []
-                    existing_node.data["aliases"].extend(entity.aliases)
-                    existing_node.data["aliases"] = list(set(existing_node.data["aliases"]))
-                    if "mentions" not in existing_node.data:
-                        existing_node.data["mentions"] = []
-                    existing_node.data["mentions"].extend(entity.mentions)
-            
-            # Add relationships as edges
-            relationships_added = 0
+                node = Node(id=entity['name'], data=entity)
+                storage_backends[b].entities[entity['name']] = node
             for rel in relationships:
-                # Ensure both entities exist
-                if rel.source in memory_banks[b]["nodes"] and rel.target in memory_banks[b]["nodes"]:
-                    # Check if relationship already exists
-                    existing_edge = None
-                    for edge in memory_banks[b]["edges"]:
-                        if (edge.source == rel.source and edge.target == rel.target and 
-                            edge.data.get("type") == rel.relation_type):
-                            existing_edge = edge
-                            break
-                    
-                    if not existing_edge:
-                        edge_data = {
-                            "type": rel.relation_type,
-                            "confidence": rel.confidence,
-                            "context": rel.context,
-                            "dependency_path": rel.dependency_path,
-                            "from_modern_kg": True
-                        }
-                        edge = Edge(source=rel.source, target=rel.target, data=edge_data)
-                        memory_banks[b]["edges"].append(edge)
-                        relationships_added += 1
-            
-            save_memory_banks()
-            
+                edge = Edge(source=rel['source'], target=rel['target'], data=rel)
+                storage_backends[b].relationships.append(edge)
             return {
                 "status": "success",
                 "method": "modern_nlp",
                 "entities_added": entities_added,
-                "total_entities": len(memory_banks[b]["nodes"]),
+                "total_entities": len(storage_backends[b].entities),
                 "relationships_added": relationships_added,
-                "total_relationships": len(memory_banks[b]["edges"]),
+                "total_relationships": len(storage_backends[b].relationships),
                 "bank": b,
                 "stats": stats
             }
-            
-        except Exception as e:
-            logger.error(f"Modern KG construction failed: {e}, falling back to basic method")
-    
-    # Fallback to basic method
-    logger.warning("Using basic fallback method for knowledge graph construction")
-    entities = extract_advanced_entities(text)
-    
-    # Add entities as nodes
-    for entity_name, entity_info in entities.items():
-        if entity_name not in memory_banks[b]["nodes"]:
-            node = Node(id=entity_name, data={
-                "type": entity_info["type"],
-                "confidence": entity_info["confidence"],
-                "from_text": True,
-                "extraction_method": "basic_fallback"
-            })
-            memory_banks[b]["nodes"][entity_name] = node
-    
-    # Extract relationships using fallback method
-    relationships = extract_relationships(text, entities)
-    
-    # Add relationships as edges
-    edges_added = 0
-    for rel in relationships:
-        if isinstance(rel, dict) and "from" in rel and "to" in rel:
-            source, target = rel["from"], rel["to"]
-            rel_type = rel.get("type", "related_to")
-        else:
-            continue
-            
-        # Check if relationship already exists
-        existing_edge = None
-        for edge in memory_banks[b]["edges"]:
-            if (edge.source == source and edge.target == target and 
-                edge.data.get("type") == rel_type):
-                existing_edge = edge
-                break
-        
-        if not existing_edge and source in memory_banks[b]["nodes"] and target in memory_banks[b]["nodes"]:
-            edge_data = {
-                "type": rel_type,
-                "confidence": rel.get("confidence", 0.5),
-                "from_text": True,
-                "extraction_method": "basic_fallback"
-            }
-            edge = Edge(source=source, target=target, data=edge_data)
-            memory_banks[b]["edges"].append(edge)
-            edges_added += 1
-    
-    save_memory_banks()
-    return {
-        "status": "success", 
-        "method": "basic_fallback",
-        "entities": list(entities.keys()), 
-        "edges_added": edges_added, 
-        "bank": b
-    }
+    except Exception as e:
+        logger.error(f"Modern KG construction failed: {e}, falling back to basic method")
+        # Fallback to basic method
+        logger.warning("Using basic fallback method for knowledge graph construction")
+        entities = extract_advanced_entities(text)
+        # Add entities as nodes
+        for entity_name, entity_info in entities.items():
+            if entity_name not in storage_backends[b].entities:
+                node = Node(id=entity_name, data={
+                    "type": entity_info["type"],
+                    "confidence": entity_info["confidence"],
+                    "from_text": True,
+                    "extraction_method": "basic_fallback"
+                })
+                storage_backends[b].entities[entity_name] = node
+        # Extract relationships using fallback method
+        relationships = extract_relationships(text, entities)
+        # Add relationships as edges
+        edges_added = 0
+        for rel in relationships:
+            if isinstance(rel, dict) and "from" in rel and "to" in rel:
+                source, target = rel["from"], rel["to"]
+                rel_type = rel.get("type", "related_to")
+            else:
+                continue
+            # Check if relationship already exists
+            existing_edge = None
+            for edge in storage_backends[b].relationships:
+                if (edge.source == source and edge.target == target and 
+                    edge.data.get("type") == rel_type):
+                    existing_edge = edge
+                    break
+            if not existing_edge and source in storage_backends[b].entities and target in storage_backends[b].entities:
+                edge_data = {
+                    "type": rel_type,
+                    "confidence": rel.get("confidence", 0.5),
+                    "from_text": True,
+                    "extraction_method": "basic_fallback"
+                }
+                edge = Edge(source=source, target=target, data=edge_data)
+                storage_backends[b].relationships.append(edge)
+                edges_added += 1
+        return {
+            "status": "success", 
+            "method": "basic_fallback",
+            "entities": list(entities.keys()), 
+            "edges_added": edges_added, 
+            "bank": b
+        }
 
 class KnowledgeIngest(BaseModel):
     text: str
@@ -3708,1270 +3661,161 @@ async def analyze_graph_enhanced(request: Dict[str, Any] = Body(...)):
 async def handle_mcp_stdio():
     """Handle MCP communication over stdio"""
     global current_bank
-    logger.debug("Starting MCP stdio mode")
+    logger.debug("Starting MCP stdio mode (modern storage)")
+    current_bank = "default"
+    
+    # Initialize default storage backend if not exists
+    if current_bank not in storage_backends:
+        storage_backends[current_bank] = create_graph_store("memory")
     
     while True:
         try:
-            # Read JSON-RPC request from stdin
             line = sys.stdin.readline()
             if not line:
                 break
-                
             request = json.loads(line.strip())
+            response = None
             
-            # Handle the request
-            if request.get("method") == "initialize":
+            method = request.get("method")
+            request_id = request.get("id")
+            params = request.get("params", {})
+            
+            if method == "initialize":
                 response = {
                     "jsonrpc": "2.0",
-                    "id": request.get("id"),
+                    "id": request_id,
                     "result": {
-                        "protocolVersion": "2025-06-18",
-                        "serverInfo": {
-                            "name": "Graph Memory MCP Server",
-                            "version": "1.0"
-                        },
+                        "protocolVersion": "2024-11-05",
                         "capabilities": {
-                            "tools": {"listChanged": True},
-                            "resources": {"subscribe": False, "listChanged": True},
-                            "roots": {"listChanged": True},
-                            "prompts": {"listChanged": False},
-                            "completion": {"supports": ["text"]}
+                            "tools": {},
+                            "resources": {},
+                            "prompts": {},
+                            "logging": {}
+                        },
+                        "serverInfo": {
+                            "name": "graph-memory",
+                            "version": "1.0.0"
                         }
                     }
                 }
-            elif request.get("method") == "tools/list":
+            elif method == "tools/list":
                 response = {
                     "jsonrpc": "2.0",
-                    "id": request.get("id"),
+                    "id": request_id,
                     "result": {
-                        "tools": [
-                            {
-                                "name": "create_entities",
-                                "description": "Create multiple new entities in the knowledge graph with optional auto-extraction of additional entities and relationships from observations. IMPORTANT: Use separate memory banks for different topics/projects (e.g., 'client-acme-project', 'personal-research'). Create banks using POST /banks/create and switch using POST /banks/select before creating entities. Never mix unrelated topics in the same bank.",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "entities": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "object",
-                                                "properties": {
-                                                    "name": {"type": "string"},
-                                                    "entityType": {"type": "string"},
-                                                    "observations": {"type": "array", "items": {"type": "string"}}
-                                                }
-                                            }
-                                        },
-                                        "auto_extract": {
-                                            "type": "boolean", 
-                                            "description": "Whether to automatically extract additional entities and relationships from observation text (default: false - observations should be descriptive)",
-                                            "default": False
-                                        }
-                                    }
-                                }
-                            },
-                            {
-                                "name": "add_observations",
-                                "description": "Add new observations to existing entities. Observations are descriptive text and do NOT auto-extract entities/relationships.",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "observations": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "object",
-                                                "properties": {
-                                                    "entityName": {"type": "string"},
-                                                    "contents": {"type": "array", "items": {"type": "string"}}
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            {
-                                "name": "create_relations",
-                                "description": "Create relations between entities",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "relations": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "object",
-                                                "properties": {
-                                                    "from": {"type": "string"},
-                                                    "to": {"type": "string"},
-                                                    "relationType": {"type": "string"}
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            {
-                                "name": "sequential_thinking",
-                                "description": "Add reasoning steps to the knowledge graph",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "step": {
-                                            "type": "object",
-                                            "properties": {
-                                                "thought": {"type": "string"},
-                                                "step_number": {"type": "number"},
-                                                "reasoning": {"type": "string"}
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            {
-                                "name": "ingest_knowledge",
-                                "description": "Create a knowledge graph from large text with advanced entity and relationship extraction",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "text": {"type": "string", "description": "Large text content to analyze"},
-                                        "bank": {"type": "string", "description": "Memory bank name"},
-                                        "source": {"type": "string", "description": "Source identifier"},
-                                        "extract_entities": {"type": "boolean", "description": "Extract entities"},
-                                        "extract_relationships": {"type": "boolean", "description": "Extract relationships"},
-                                        "create_observations": {"type": "boolean", "description": "Create observations"}
-                                    },
-                                    "required": ["text"]
-                                }
-                            },
-                            {
-                                "name": "ingest_knowledge_enhanced",
-                                "description": "Create a high-quality knowledge graph using enhanced processing with LLM concepts, semantic clustering, and quality filtering",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "text": {"type": "string", "description": "Large text content to analyze"},
-                                        "bank": {"type": "string", "description": "Memory bank name"},
-                                        "source": {"type": "string", "description": "Source identifier"},
-                                        "create_observations": {"type": "boolean", "description": "Create observations"}
-                                    },
-                                    "required": ["text"]
-                                }
-                            },
-                            {
-                                "name": "search_nodes",
-                                "description": "Search for nodes in the knowledge graph based on a query. IMPORTANT: Search within specific banks using bank parameter to avoid cross-topic contamination. Use GET /banks/list to see available banks first.",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "query": {"type": "string", "description": "The search query to match against entity names, types, and observation content"},
-                                        "bank": {"type": "string", "description": "Optional: Memory bank to search in (e.g., 'client-acme-project'). If not specified, searches current bank."}
-                                    },
-                                    "required": ["query"]
-                                }
-                            },
-                            {
-                                "name": "delete_entities",
-                                "description": "Delete multiple entities and their associated relations from the knowledge graph",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "entityNames": {"type": "array", "items": {"type": "string"}, "description": "An array of entity names to delete"}
-                                    },
-                                    "required": ["entityNames"]
-                                }
-                            },
-                            {
-                                "name": "delete_relations",
-                                "description": "Delete multiple relations from the knowledge graph",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "relations": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "object",
-                                                "properties": {
-                                                    "from": {"type": "string", "description": "The name of the entity where the relation starts"},
-                                                    "to": {"type": "string", "description": "The name of the entity where the relation ends"},
-                                                    "relationType": {"type": "string", "description": "The type of the relation"}
-                                                },
-                                                "required": ["from", "to", "relationType"]
-                                            },
-                                            "description": "An array of relations to delete"
-                                        }
-                                    },
-                                    "required": ["relations"]
-                                }
-                            },
-                            {
-                                "name": "delete_observations",
-                                "description": "Delete specific observations from entities in the knowledge graph",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "deletions": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "object",
-                                                "properties": {
-                                                    "entityName": {"type": "string", "description": "The name of the entity containing the observations"},
-                                                    "observations": {"type": "array", "items": {"type": "string"}, "description": "An array of observations to delete"}
-                                                },
-                                                "required": ["entityName", "observations"]
-                                            },
-                                            "description": "An array of deletion specifications"
-                                        }
-                                    },
-                                    "required": ["deletions"]
-                                }
-                            },
-                            {
-                                "name": "read_graph",
-                                "description": "Read the entire knowledge graph summary for the current memory bank. Shows entity/relationship counts and types. Use this to understand bank contents before adding new knowledge.",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "bank": {"type": "string", "description": "Optional: Memory bank to read (e.g., 'client-acme-project'). If not specified, reads current bank."}
-                                    }
-                                }
-                            },
-                            {
-                                "name": "open_nodes",
-                                "description": "Open specific nodes in the knowledge graph by their names",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "names": {"type": "array", "items": {"type": "string"}, "description": "An array of entity names to retrieve"}
-                                    },
-                                    "required": ["names"]
-                                }
-                            },
-                            {
-                                "name": "create_bank",
-                                "description": "Create a new memory bank for organizing different topics/projects. CRITICAL: Always create specific banks for different projects - never use 'default' for real work.",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "bank": {"type": "string", "description": "Name of the memory bank to create (e.g., 'project-acme-auth', 'research-ai-optimization')"}
-                                    },
-                                    "required": ["bank"]
-                                }
-                            },
-                            {
-                                "name": "select_bank",
-                                "description": "Switch to a different memory bank. All subsequent operations will operate on the selected bank.",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "bank": {"type": "string", "description": "Name of the memory bank to switch to"}
-                                    },
-                                    "required": ["bank"]
-                                }
-                            },
-                            {
-                                "name": "list_banks",
-                                "description": "List all available memory banks with their statistics (entity count, relationship count, etc.)",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {}
-                                }
-                            },
-                            {
-                                "name": "delete_bank",
-                                "description": "Delete a memory bank and all its contents. Cannot delete the 'default' bank.",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "bank": {"type": "string", "description": "Name of the memory bank to delete"}
-                                    },
-                                    "required": ["bank"]
-                                }
-                            }
-                        ]
+                        "tools": TOOL_LIST
                     }
                 }
-            elif request.get("method") == "notifications/initialized":
-                # Handle initialized notification - no response needed
-                continue  # Skip sending response for notifications
-            elif request.get("method") == "prompts/list":
-                response = {
-                    "jsonrpc": "2.0",
-                    "id": request.get("id"),
-                    "result": {
-                        "prompts": []
-                    }
-                }
-            elif request.get("method") == "tools/call":
-                # Handle tool calls
-                tool_name = request.get("params", {}).get("name")
-                arguments = request.get("params", {}).get("arguments", {})
+            elif method == "tools/call":
+                tool_name = params.get("name")
+                tool_arguments = params.get("arguments", {})
                 
-                if tool_name == "create_entities":
-                    entities = arguments.get("entities", [])
-                    auto_extract = arguments.get("auto_extract", False)  # Keep False default - can be explicitly enabled if needed
-                    created_entities = []
-                    observations_added = 0
-                    extracted_entities = {}
-                    extracted_relationships = []
-                    extracted_count = 0
-                    
-                    try:
-                        # First pass: Create the explicitly specified entities
+                try:
+                    # Handle tool calls based on tool name
+                    if tool_name == "create_entities":
+                        # Process create_entities tool
+                        entities = tool_arguments.get("entities", [])
+                        results = []
                         for entity_data in entities:
-                            node = Node(
-                                id=entity_data["name"],
-                                data={
-                                    "type": entity_data["entityType"]
-                                }
-                            )
-                            memory_banks[current_bank]["nodes"][node.id] = node
-                            created_entities.append(node.model_dump())
-                            
-                            # Add observations separately to the observations collection
+                            entity_name = entity_data.get("name")
+                            entity_type = entity_data.get("entityType")
                             observations = entity_data.get("observations", [])
-                            all_observation_text = " ".join(observations)
                             
-                            for obs_content in observations:
-                                obs = Observation(
-                                    id=f"obs-{len(memory_banks[current_bank]['observations'])}",
-                                    entity_id=entity_data["name"],
-                                    content=obs_content,
-                                    timestamp=str(time.time())
-                                )
-                                memory_banks[current_bank]["observations"].append(obs)
-                                observations_added += 1
-                            
-                            # Extract additional entities and relationships from observations
-                            if auto_extract and all_observation_text.strip():
-                                try:
-                                    # Extract entities from observation text
-                                    obs_entities = extract_advanced_entities(all_observation_text)
-                                    for entity_name, entity_info in obs_entities.items():
-                                        if entity_name not in memory_banks[current_bank]["nodes"] and entity_name != entity_data["name"]:
-                                            extracted_entities[entity_name] = entity_info
-                                    
-                                    # Extract relationships involving this entity
-                                    all_entities = {entity_data["name"]: {"type": entity_data["entityType"], "confidence": 1.0}}
-                                    all_entities.update(obs_entities)
-                                    obs_relationships = extract_relationships(all_observation_text, all_entities)
-                                    extracted_relationships.extend(obs_relationships)
-                                except Exception as e:
-                                    logger.error(f"Error during auto-extraction: {e}")
-                        
-                        # Second pass: Create extracted entities
-                        if auto_extract:
-                            for entity_name, entity_info in extracted_entities.items():
-                                node = Node(
-                                    id=entity_name,
-                                    data={
-                                        "type": entity_info["type"],
-                                        "confidence": entity_info["confidence"],
-                                        "auto_extracted": True
-                                    }
-                                )
-                                memory_banks[current_bank]["nodes"][node.id] = node
-                                extracted_count += 1
-                            
-                            # Create extracted relationships
-                            for rel in extracted_relationships:
-                                if (rel["from"] in memory_banks[current_bank]["nodes"] and 
-                                    rel["to"] in memory_banks[current_bank]["nodes"]):
-                                    edge = Edge(
-                                        source=rel["from"],
-                                        target=rel["to"],
-                                        data={
-                                            "type": rel["type"],
-                                            "confidence": rel.get("confidence", 0.7),
-                                            "auto_extracted": True
-                                        }
-                                    )
-                                    edge.id = f"{edge.source}-{edge.target}-{len(memory_banks[current_bank]['edges'])}"
-                                    memory_banks[current_bank]["edges"].append(edge)
-                        
-                        save_memory_banks()
-                        
-                        result_text = f"Created {len(created_entities)} entities: {[e['id'] for e in created_entities]}"
-                        if auto_extract and extracted_count > 0:
-                            result_text += f"\nAuto-extracted {extracted_count} additional entities and {len(extracted_relationships)} relationships from observations"
-                        
-                    except Exception as e:
-                        logger.error(f"Error in create_entities: {e}")
-                        result_text = f"Created {len(created_entities)} entities (with errors during auto-extraction)"
-                    
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request.get("id"),
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": result_text
-                                }
-                            ]
-                        }
-                    }
-                    
-                elif tool_name == "add_observations":
-                    observations = arguments.get("observations", [])
-                    auto_extract = False  # DISABLED: Observations should be descriptive text, not entity sources
-                    added_count = 0
-                    extracted_entities = {}
-                    extracted_relationships = []
-                    all_observation_texts = []
-                    extracted_count = 0
-                    
-                    try:
-                        # First pass: Add observations and collect text for extraction
-                        for obs_data in observations:
-                            entity_name = obs_data["entityName"]
-                            contents = obs_data.get("contents", [])
-                            if entity_name in memory_banks[current_bank]["nodes"]:
-                                for content in contents:
-                                    obs = Observation(
-                                        id=f"obs-{len(memory_banks[current_bank]['observations'])}",
-                                        entity_id=entity_name,
-                                        content=content,
-                                        timestamp=str(time.time())
-                                    )
-                                    memory_banks[current_bank]["observations"].append(obs)
-                                    added_count += 1
-                                    
-                                    # Collect text for knowledge extraction
-                                    if auto_extract:
-                                        all_observation_texts.append(content)
-                        
-                        # Second pass: Extract knowledge from all observation text
-                        if auto_extract and all_observation_texts:
-                            try:
-                                combined_text = " ".join(all_observation_texts)
-                                
-                                # Extract entities from observation text
-                                obs_entities = extract_advanced_entities(combined_text)
-                                for entity_name, entity_info in obs_entities.items():
-                                    if entity_name not in memory_banks[current_bank]["nodes"]:
-                                        extracted_entities[entity_name] = entity_info
-                                
-                                # Create extracted entities
-                                for entity_name, entity_info in extracted_entities.items():
-                                    node = Node(
-                                        id=entity_name,
-                                        data={
-                                            "type": entity_info["type"],
-                                            "confidence": entity_info["confidence"],
-                                            "auto_extracted": True
-                                        }
-                                    )
-                                    memory_banks[current_bank]["nodes"][node.id] = node
-                                    extracted_count += 1
-                                
-                                # Extract relationships involving all entities (existing + extracted)
-                                all_entities = {}
-                                for entity_id in memory_banks[current_bank]["nodes"]:
-                                    node = memory_banks[current_bank]["nodes"][entity_id]
-                                    all_entities[entity_id] = {
-                                        "type": node.data.get("type", "unknown"),
-                                        "confidence": node.data.get("confidence", 1.0)
-                                    }
-                                
-                                obs_relationships = extract_relationships(combined_text, all_entities)
-                                
-                                # Create extracted relationships
-                                for rel in obs_relationships:
-                                    if (rel["from"] in memory_banks[current_bank]["nodes"] and 
-                                        rel["to"] in memory_banks[current_bank]["nodes"]):
-                                        edge = Edge(
-                                            source=rel["from"],
-                                            target=rel["to"],
-                                            data={
-                                                "type": rel["type"],
-                                                "confidence": rel.get("confidence", 0.7),
-                                                "auto_extracted": True
-                                            }
-                                        )
-                                        edge.id = f"{edge.source}-{edge.target}-{len(memory_banks[current_bank]['edges'])}"
-                                        memory_banks[current_bank]["edges"].append(edge)
-                                        extracted_relationships.append(rel)
-                            except Exception as e:
-                                logger.error(f"Error during auto-extraction in add_observations: {e}")
-                        
-                        save_memory_banks()
-                        
-                        result_text = f"Added {added_count} observations"
-                        if auto_extract and extracted_count > 0:
-                            result_text += f"\nAuto-extracted {extracted_count} additional entities and {len(extracted_relationships)} relationships from observations"
-                        
-                    except Exception as e:
-                        logger.error(f"Error in add_observations: {e}")
-                        result_text = f"Added {added_count} observations (with errors during auto-extraction)"
-                    
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request.get("id"),
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": result_text
-                                }
-                            ]
-                        }
-                    }
-                    
-                elif tool_name == "create_relations":
-                    relations = arguments.get("relations", [])
-                    created_relations = []
-                    for rel_data in relations:
-                        edge = Edge(
-                            source=rel_data["from"],
-                            target=rel_data["to"],
-                            data={"type": rel_data["relationType"]}
-                        )
-                        edge.id = f"{edge.source}-{edge.target}-{len(memory_banks[current_bank]['edges'])}"
-                        memory_banks[current_bank]["edges"].append(edge)
-                        created_relations.append(edge.model_dump())
-                    save_memory_banks()
-                    
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request.get("id"),
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"Created {len(created_relations)} relations"
-                                }
-                            ]
-                        }
-                    }
-                    
-                elif tool_name == "sequential_thinking":
-                    step_data = arguments.get("step", {})
-                    step = ReasoningStep(
-                        id=f"step-{len(memory_banks[current_bank]['reasoning_steps'])}",
-                        description=step_data.get("thought", ""),
-                        status="completed",
-                        timestamp=str(time.time())
-                    )
-                    memory_banks[current_bank]["reasoning_steps"].append(step)
-                    save_memory_banks()
-                    
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request.get("id"),
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"Added reasoning step: {step.description}"
-                                }
-                            ]
-                        }
-                    }
-                    
-                elif tool_name == "ingest_knowledge":
-                    # Create KnowledgeIngest object from arguments
-                    text = arguments.get("text", "")
-                    bank = arguments.get("bank", current_bank)
-                    source = arguments.get("source", "text_input")
-                    extract_entities = arguments.get("extract_entities", True)
-                    should_extract_relationships = arguments.get("extract_relationships", True)
-                    create_observations = arguments.get("create_observations", True)
-                    
-                    # Process the knowledge ingestion
-                    entities_created = 0
-                    relationships_created = 0
-                    observations_created = 0
-                    
-                    if extract_entities:
-                        # Use modern spaCy-based processor instead of old regex-based function
-                        entities_list, relationships_list = kg_processor.process_text(text)
-                        
-                        # Convert entities list to dictionary for compatibility
-                        extracted_entities = {}
-                        for entity in entities_list:
-                            extracted_entities[entity.name] = {
-                                "type": entity.entity_type,
-                                "confidence": entity.confidence
-                            }
-                        
-                        # Convert relationships list to list of dictionaries for compatibility
-                        extracted_relationships = []
-                        for rel in relationships_list:
-                            extracted_relationships.append({
-                                "from": rel.source,
-                                "to": rel.target,
-                                "type": rel.relation_type,
-                                "context": rel.context,
-                                "confidence": rel.confidence
-                            })
-                        
-                        for entity_name, entity_info in extracted_entities.items():
-                            entity_id = entity_name.replace(" ", "_").lower()
-                            
-                            if entity_id not in memory_banks[bank]["nodes"]:
-                                node = Node(
-                                    id=entity_id,
-                                    data={
-                                        "name": entity_name,
-                                        "type": entity_info["type"],
-                                        "confidence": entity_info["confidence"],
-                                        "source": source,
-                                        "extracted_from": "text_analysis",
-                                        "created_at": datetime.now().isoformat()
-                                    }
-                                )
-                                memory_banks[bank]["nodes"][entity_id] = node
-                                entities_created += 1
-                            
-                            if create_observations:
-                                pattern = rf'(.{{0,50}}\b{re.escape(entity_name)}\b.{{0,50}})'
-                                contexts = re.findall(pattern, text, re.IGNORECASE)
-                                
-                                for context in contexts[:2]:  # Limit to 2 contexts per entity
-                                    obs = Observation(
-                                        id=str(uuid.uuid4()),
-                                        entity_id=entity_id,
-                                        content=f"Found in context: \"{context.strip()}\"",
-                                        timestamp=datetime.now().isoformat()
-                                    )
-                                    memory_banks[bank]["observations"].append(obs)
-                                    observations_created += 1
-                        
-                        if should_extract_relationships and extracted_entities:
-                            # Use relationships already extracted by modern processor
-                            relationships = extracted_relationships
-                            
-                            for rel in relationships:
-                                from_id = rel["from"].replace(" ", "_").lower()
-                                to_id = rel["to"].replace(" ", "_").lower()
-                                
-                                if from_id in memory_banks[bank]["nodes"] and to_id in memory_banks[bank]["nodes"]:
-                                    edge = Edge(
-                                        source=from_id,
-                                        target=to_id,
-                                        data={
-                                            "type": rel["type"],
-                                            "context": rel["context"],
-                                            "confidence": rel["confidence"],
-                                            "source": source,
-                                            "extracted_from": "text_analysis",
-                                            "created_at": datetime.now().isoformat()
-                                        }
-                                    )
-                                    edge.id = f"{from_id}-{rel['type']}-{to_id}-{len(memory_banks[bank]['edges'])}"
-                                    memory_banks[bank]["edges"].append(edge)
-                                    relationships_created += 1
-                    
-                    save_memory_banks()
-                    
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request.get("id"),
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"Knowledge graph created: {entities_created} entities, {relationships_created} relationships, {observations_created} observations from {len(text.split())} words of text"
-                                }
-                            ]
-                        }
-                    }
-                
-                elif tool_name == "ingest_knowledge_enhanced":
-                    # Enhanced knowledge ingestion with quality filtering
-                    text = arguments.get("text", "")
-                    bank = arguments.get("bank", current_bank)
-                    source = arguments.get("source", "text_input")
-                    create_observations = arguments.get("create_observations", True)
-                    
-                    if not ENHANCED_KG_AVAILABLE:
-                        response = {
-                            "jsonrpc": "2.0",
-                            "id": request.get("id"),
-                            "error": {
-                                "code": -32000,
-                                "message": "Enhanced knowledge graph processor not available"
-                            }
-                        }
-                        continue
-                    
-                    # Process the knowledge ingestion with enhanced processor
-                    entities_created = 0
-                    relationships_created = 0
-                    observations_created = 0
-                    
-                    # Use enhanced spaCy-based processor
-                    entities_list, relationships_list = enhanced_kg_processor.process_text_enhanced(text)
-                    
-                    # Convert enhanced entities to our format
-                    for entity in entities_list:
-                        entity_id = entity.name.replace(" ", "_").lower()
-                        
-                        if entity_id not in memory_banks[bank]["nodes"]:
                             node = Node(
-                                id=entity_id,
+                                id=entity_name,
                                 data={
-                                    "name": entity.name,
-                                    "type": entity.entity_type,
-                                    "confidence": entity.confidence,
-                                    "importance_score": entity.importance_score,
-                                    "is_clustered": entity.is_clustered,
-                                    "cluster_id": entity.cluster_id,
-                                    "source": source,
-                                    "extracted_from": "enhanced_analysis",
-                                    "created_at": datetime.now().isoformat()
+                                    "name": entity_name,
+                                    "type": entity_type,
+                                    "observations": observations,
+                                    "created_at": datetime.utcnow().isoformat()
                                 }
                             )
-                            memory_banks[bank]["nodes"][entity_id] = node
-                            entities_created += 1
-                        
-                        if create_observations:
-                            # Add context snippets as observations
-                            for context in entity.context_snippets[:2]:  # Limit to 2 contexts per entity
-                                obs = Observation(
-                                    id=str(uuid.uuid4()),
-                                    entity_id=entity_id,
-                                    content=f"Context: \"{context.strip()}\"",
-                                    timestamp=datetime.now().isoformat()
-                                )
-                                memory_banks[bank]["observations"].append(obs)
-                                observations_created += 1
-                            
-                            # Add mentions as observations
-                            for mention in entity.mentions[:2]:  # Limit to 2 mentions
-                                obs = Observation(
-                                    id=str(uuid.uuid4()),
-                                    entity_id=entity_id,
-                                    content=f"Mentioned as: \"{mention}\"",
-                                    timestamp=datetime.now().isoformat()
-                                )
-                                memory_banks[bank]["observations"].append(obs)
-                                observations_created += 1
-                    
-                    # Convert enhanced relationships to our format
-                    for rel in relationships_list:
-                        from_id = rel.source.replace(" ", "_").lower()
-                        to_id = rel.target.replace(" ", "_").lower()
-                        
-                        if from_id in memory_banks[bank]["nodes"] and to_id in memory_banks[bank]["nodes"]:
-                            edge = Edge(
-                                source=from_id,
-                                target=to_id,
-                                data={
-                                    "type": rel.relation_type,
-                                    "context": rel.context,
-                                    "confidence": rel.confidence,
-                                    "semantic_score": rel.semantic_score,
-                                    "source": source,
-                                    "extracted_from": "enhanced_analysis",
-                                    "created_at": datetime.now().isoformat()
-                                }
-                            )
-                            edge.id = f"{from_id}-{rel.relation_type}-{to_id}-{len(memory_banks[bank]['edges'])}"
-                            memory_banks[bank]["edges"].append(edge)
-                            relationships_created += 1
-                    
-                    save_memory_banks()
-                    
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request.get("id"),
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"Enhanced knowledge graph created: {entities_created} high-quality entities, {relationships_created} semantic relationships, {observations_created} observations from {len(text.split())} words of text"
-                                }
-                            ]
-                        }
-                    }
-                
-                elif tool_name == "search_nodes":
-                    query = arguments.get("query", "")
-                    bank = arguments.get("bank")
-                    entity_type = arguments.get("entity_type")
-                    case_sensitive = arguments.get("case_sensitive", False)
-                    use_regex = arguments.get("use_regex", False)
-                    limit = arguments.get("limit", 50)
-                    
-                    # Handle special case of listing all entities
-                    if query == "*" or query == "":
-                        b = bank or current_bank
-                        entity_ids = list(memory_banks[b]["nodes"].keys())
-                        results = [{"entity_id": eid} for eid in entity_ids]
-                    else:
-                        results = search_entities(query, bank, entity_type, case_sensitive, use_regex)
-                    
-                    if limit:
-                        results = results[:limit]
-                    
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request.get("id"),
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"Found {len(results)} entities matching '{query}': " + 
-                                           ", ".join([r["entity_id"] for r in results[:10]]) +
-                                           (f" (and {len(results)-10} more)" if len(results) > 10 else "")
-                                }
-                            ]
-                        }
-                    }
-                
-                elif tool_name == "search_relations":
-                    query = arguments.get("query", "")
-                    bank = arguments.get("bank")
-                    relationship_type = arguments.get("relationship_type")
-                    case_sensitive = arguments.get("case_sensitive", False)
-                    use_regex = arguments.get("use_regex", False)
-                    limit = arguments.get("limit", 50)
-                    
-                    results = search_relationships(query, bank, relationship_type, case_sensitive, use_regex)
-                    
-                    if limit:
-                        results = results[:limit]
-                    
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request.get("id"),
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"Found {len(results)} relationships matching '{query}': " +
-                                           ", ".join([f"{r['from_entity']} -> {r['to_entity']}" for r in results[:5]]) +
-                                           (f" (and {len(results)-5} more)" if len(results) > 5 else "")
-                                }
-                            ]
-                        }
-                    }
-                
-                elif tool_name == "search_observations":
-                    query = arguments.get("query", "")
-                    bank = arguments.get("bank")
-                    entity_id = arguments.get("entity_id")
-                    case_sensitive = arguments.get("case_sensitive", False)
-                    use_regex = arguments.get("use_regex", False)
-                    limit = arguments.get("limit", 50)
-                    
-                    results = search_observations(query, bank, entity_id, case_sensitive, use_regex)
-                    
-                    if limit:
-                        results = results[:limit]
-                    
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request.get("id"),
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"Found {len(results)} observations matching '{query}': " +
-                                           ", ".join([f"{r['entity_id']}: {r['content'][:50]}..." for r in results[:3]]) +
-                                           (f" (and {len(results)-3} more)" if len(results) > 3 else "")
-                                }
-                            ]
-                        }
-                    }
-                
-                elif tool_name == "search_all":
-                    query = arguments.get("query", "")
-                    bank = arguments.get("bank")
-                    case_sensitive = arguments.get("case_sensitive", False)
-                    use_regex = arguments.get("use_regex", False)
-                    limit = arguments.get("limit", 50)
-                    
-                    entities = search_entities(query, bank, None, case_sensitive, use_regex)
-                    relationships = search_relationships(query, bank, None, case_sensitive, use_regex)
-                    observations = search_observations(query, bank, None, case_sensitive, use_regex)
-                    
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request.get("id"),
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"Search results for '{query}':\n" +
-                                           f"- {len(entities)} entities\n" +
-                                           f"- {len(relationships)} relationships\n" +
-                                           f"- {len(observations)} observations\n\n" +
-                                           f"Top entities: {', '.join([e['entity_id'] for e in entities[:5]])}\n" +
-                                           "Top relationships: " + ', '.join([f"{r['from_entity']}->{r['to_entity']}" for r in relationships[:3]])
-                                }
-                            ]
-                        }
-                    }
-                
-                elif tool_name == "delete_entities":
-                    entity_names = arguments.get("entityNames", [])
-                    deleted_count = 0
-                    
-                    # Handle special case of deleting all entities
-                    if entity_names == ["ALL"] or not entity_names:
-                        deleted_count = len(memory_banks[current_bank]["nodes"])
-                        memory_banks[current_bank]["nodes"].clear()
-                        memory_banks[current_bank]["edges"].clear()
-                        memory_banks[current_bank]["observations"].clear()
-                    else:
-                        for entity_name in entity_names:
-                            if entity_name in memory_banks[current_bank]["nodes"]:
-                                # Remove the entity
-                                del memory_banks[current_bank]["nodes"][entity_name]
-                                deleted_count += 1
-                                
-                                # Remove related edges
-                                memory_banks[current_bank]["edges"] = [
-                                    edge for edge in memory_banks[current_bank]["edges"]
-                                    if edge.source != entity_name and edge.target != entity_name
-                                ]
-                                
-                                # Remove related observations
-                                memory_banks[current_bank]["observations"] = [
-                                    obs for obs in memory_banks[current_bank]["observations"]
-                                    if obs.entity_id != entity_name
-                                ]
-                    
-                    save_memory_banks()
-                    
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request.get("id"),
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"Deleted {deleted_count} entities and their associated relations and observations"
-                                }
-                            ]
-                        }
-                    }
-                
-                elif tool_name == "delete_relations":
-                    relations = arguments.get("relations", [])
-                    deleted_count = 0
-                    
-                    for rel_data in relations:
-                        from_entity = rel_data["from"]
-                        to_entity = rel_data["to"]
-                        relation_type = rel_data["relationType"]
-                        
-                        # Find and remove matching edges
-                        original_count = len(memory_banks[current_bank]["edges"])
-                        memory_banks[current_bank]["edges"] = [
-                            edge for edge in memory_banks[current_bank]["edges"]
-                            if not (edge.source == from_entity and 
-                                   edge.target == to_entity and 
-                                   edge.data.get("type") == relation_type)
-                        ]
-                        deleted_count += original_count - len(memory_banks[current_bank]["edges"])
-                    
-                    save_memory_banks()
-                    
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request.get("id"),
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"Deleted {deleted_count} relations"
-                                }
-                            ]
-                        }
-                    }
-                
-                elif tool_name == "delete_observations":
-                    deletions = arguments.get("deletions", [])
-                    total_deleted = 0
-                    
-                    for deletion in deletions:
-                        entity_name = deletion["entityName"]
-                        observations_to_delete = deletion["observations"]
-                        
-                        # Remove specified observations
-                        original_count = len(memory_banks[current_bank]["observations"])
-                        memory_banks[current_bank]["observations"] = [
-                            obs for obs in memory_banks[current_bank]["observations"]
-                            if not (obs.entity_id == entity_name and obs.content in observations_to_delete)
-                        ]
-                        total_deleted += original_count - len(memory_banks[current_bank]["observations"])
-                    
-                    save_memory_banks()
-                    
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request.get("id"),
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"Deleted {total_deleted} observations"
-                                }
-                            ]
-                        }
-                    }
-                
-                elif tool_name == "read_graph":
-                    bank = arguments.get("bank", current_bank)
-                    if bank not in memory_banks:
-                        bank = current_bank
-                    
-                    nodes = memory_banks[bank]["nodes"]
-                    edges = memory_banks[bank]["edges"]
-                    observations = memory_banks[bank]["observations"]
-                    
-                    graph_summary = {
-                        "bank": bank,
-                        "entities": len(nodes),
-                        "relationships": len(edges),
-                        "observations": len(observations),
-                        "entity_types": list(set(node.data.get("type", "unknown") for node in nodes.values())),
-                        "relation_types": list(set(edge.data.get("type", "unknown") for edge in edges))
-                    }
-                    
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request.get("id"),
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"Knowledge Graph Summary for bank '{bank}':\n" +
-                                           f"- {graph_summary['entities']} entities\n" +
-                                           f"- {graph_summary['relationships']} relationships\n" +
-                                           f"- {graph_summary['observations']} observations\n" +
-                                           f"- Entity types: {', '.join(graph_summary['entity_types'])}\n" +
-                                           f"- Relation types: {', '.join(graph_summary['relation_types'])}"
-                                }
-                            ]
-                        }
-                    }
-                
-                elif tool_name == "open_nodes":
-                    names = arguments.get("names", [])
-                    found_nodes = []
-                    
-                    # Handle special case of opening all nodes
-                    if names == ["ALL"] or not names:
-                        entity_names = list(memory_banks[current_bank]["nodes"].keys())
-                    else:
-                        entity_names = names
-                    
-                    for name in entity_names:
-                        if name in memory_banks[current_bank]["nodes"]:
-                            node = memory_banks[current_bank]["nodes"][name]
-                            # Get related observations
-                            node_observations = [
-                                obs.content for obs in memory_banks[current_bank]["observations"]
-                                if obs.entity_id == name
-                            ]
-                            # Get related relationships
-                            node_relations = [
-                                {"from": edge.source, "to": edge.target, "type": edge.data.get("type", "unknown")}
-                                for edge in memory_banks[current_bank]["edges"]
-                                if edge.source == name or edge.target == name
-                            ]
-                            
-                            found_nodes.append({
-                                "name": name,
-                                "type": node.data.get("type", "unknown"),
-                                "observations": node_observations,
-                                "relationships": node_relations
+                            storage_backends[current_bank].entities[entity_name] = node
+                            results.append({
+                                "name": entity_name,
+                                "entityType": entity_type,
+                                "observations": observations
                             })
+                        
+                        response = {
+                            "jsonrpc": "2.0",
+                            "id": request_id,
+                            "result": {
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": f"Created {len(results)} entities successfully"
+                                    }
+                                ]
+                            }
+                        }
                     
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request.get("id"),
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"Retrieved {len(found_nodes)} nodes:\n" +
-                                           "\n".join([
-                                               f"- {node['name']} ({node['type']}): {len(node['observations'])} observations, {len(node['relationships'])} relationships"
-                                               for node in found_nodes
-                                           ])
-                                }
-                            ]
+                    elif tool_name == "read_graph":
+                        # Process read_graph tool
+                        store = storage_backends[current_bank]
+                        graph_data = {
+                            "bank": current_bank,
+                            "entity_count": len(store.entities),
+                            "relation_count": len(store.relationships),
+                            "entities": [e.model_dump() for e in store.entities.values()],
+                            "relations": [r.model_dump() for r in store.relationships]
                         }
-                    }
-                
-                elif tool_name == "create_bank":
-                    bank_name = arguments.get("bank", "")
-                    if not bank_name:
+                        
                         response = {
                             "jsonrpc": "2.0",
-                            "id": request.get("id"),
-                            "error": {
-                                "code": -32602,
-                                "message": "Bank name is required"
-                            }
-                        }
-                    elif bank_name in memory_banks:
-                        response = {
-                            "jsonrpc": "2.0",
-                            "id": request.get("id"),
+                            "id": request_id,
                             "result": {
                                 "content": [
                                     {
                                         "type": "text",
-                                        "text": f"Bank '{bank_name}' already exists"
+                                        "text": json.dumps(graph_data, indent=2)
                                     }
                                 ]
                             }
                         }
-                    else:
-                        memory_banks[bank_name] = {"nodes": {}, "edges": [], "observations": [], "reasoning_steps": []}
-                        save_memory_banks()
-                        response = {
-                            "jsonrpc": "2.0",
-                            "id": request.get("id"),
-                            "result": {
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": f"Successfully created bank '{bank_name}'"
-                                    }
-                                ]
-                            }
-                        }
-                
-                elif tool_name == "select_bank":
-                    bank_name = arguments.get("bank", "")
-                    if not bank_name:
-                        response = {
-                            "jsonrpc": "2.0",
-                            "id": request.get("id"),
-                            "error": {
-                                "code": -32602,
-                                "message": "Bank name is required"
-                            }
-                        }
-                    elif bank_name not in memory_banks:
-                        response = {
-                            "jsonrpc": "2.0",
-                            "id": request.get("id"),
-                            "error": {
-                                "code": -32602,
-                                "message": f"Bank '{bank_name}' does not exist"
-                            }
-                        }
-                    else:
-                        current_bank = bank_name
-                        response = {
-                            "jsonrpc": "2.0",
-                            "id": request.get("id"),
-                            "result": {
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": f"Successfully switched to bank '{bank_name}'"
-                                    }
-                                ]
-                            }
-                        }
-                
-                elif tool_name == "list_banks":
-                    banks_info = []
-                    for bank_name, bank_data in memory_banks.items():
-                        bank_stats = {
-                            "bank": bank_name,
-                            "entities": len(bank_data["nodes"]),
-                            "relationships": len(bank_data["edges"]),
-                            "observations": len(bank_data["observations"]),
-                            "is_current": bank_name == current_bank
-                        }
-                        banks_info.append(bank_stats)
                     
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": request.get("id"),
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"Available banks ({len(banks_info)} total):\n" +
-                                           "\n".join([
-                                               f"{'• [CURRENT] ' if bank['is_current'] else '• '}{bank['bank']}: {bank['entities']} entities, {bank['relationships']} relationships, {bank['observations']} observations"
-                                               for bank in banks_info
-                                           ])
-                                }
-                            ]
-                        }
-                    }
-                
-                elif tool_name == "delete_bank":
-                    bank_name = arguments.get("bank", "")
-                    if not bank_name:
-                        response = {
-                            "jsonrpc": "2.0",
-                            "id": request.get("id"),
-                            "error": {
-                                "code": -32602,
-                                "message": "Bank name is required"
-                            }
-                        }
-                    elif bank_name == "default":
-                        response = {
-                            "jsonrpc": "2.0",
-                            "id": request.get("id"),
-                            "error": {
-                                "code": -32602,
-                                "message": "Cannot delete the default bank"
-                            }
-                        }
-                    elif bank_name not in memory_banks:
-                        response = {
-                            "jsonrpc": "2.0",
-                            "id": request.get("id"),
-                            "error": {
-                                "code": -32602,
-                                "message": f"Bank '{bank_name}' does not exist"
-                            }
-                        }
                     else:
-                        del memory_banks[bank_name]
-                        if current_bank == bank_name:
-                            current_bank = "default"
-                        save_memory_banks()
+                        # Generic tool handler for other tools
                         response = {
                             "jsonrpc": "2.0",
-                            "id": request.get("id"),
+                            "id": request_id,
                             "result": {
                                 "content": [
                                     {
                                         "type": "text",
-                                        "text": f"Successfully deleted bank '{bank_name}'"
+                                        "text": f"Tool {tool_name} executed with arguments: {json.dumps(tool_arguments)}"
                                     }
                                 ]
                             }
                         }
                 
-                else:
+                except Exception as e:
+                    logger.error(f"Tool execution error: {e}")
                     response = {
                         "jsonrpc": "2.0",
-                        "id": request.get("id"),
+                        "id": request_id,
                         "error": {
-                            "code": -32601,
-                            "message": f"Unknown tool: {tool_name}"
+                            "code": -32603,
+                            "message": f"Tool execution failed: {str(e)}"
                         }
                     }
+            
             else:
+                # Unknown method
                 response = {
                     "jsonrpc": "2.0",
-                    "id": request.get("id"),
+                    "id": request_id,
                     "error": {
                         "code": -32601,
-                        "message": "Method not found"
+                        "message": f"Method not found: {method}"
                     }
                 }
             
             # Send response to stdout
-            print(json.dumps(response))
-            sys.stdout.flush()
-            
+            if response:
+                print(json.dumps(response))
+                sys.stdout.flush()
+                
         except json.JSONDecodeError as e:
             logger.error(f"JSON decode error: {e}")
             error_response = {

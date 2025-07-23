@@ -23,6 +23,8 @@ RUN pip install --upgrade pip --disable-pip-version-check --no-warn-script-locat
 
 # Copy application files and Phase 1-3 components
 COPY main.py ./
+COPY tool_list.py ./
+COPY __init__.py ./
 COPY knowledge_graph_processor.py ./
 COPY enhanced_knowledge_processor.py ./
 COPY templates/ ./templates/
@@ -36,11 +38,15 @@ RUN chown -R appuser:appuser /app
 # Switch to non-root user
 USER appuser
 
+
 # Set environment variables for model caching (using HF_HOME instead of deprecated TRANSFORMERS_CACHE)
 ENV HF_HOME=/app/.cache/huggingface
 ENV HF_DATASETS_CACHE=/app/.cache/huggingface/datasets
 
+# Ensure Python can import mcp_server as a package
+ENV PYTHONPATH=/app
+
 EXPOSE 10642
 
-# Default command runs HTTP server, but can be overridden for MCP stdio mode
-CMD ["python", "main.py"]
+# Default command runs both HTTP server and MCP stdio mode for dual protocol support
+CMD ["python", "main.py", "--mcp-with-http"]
